@@ -248,7 +248,7 @@ certoraRun certora/conf/BookingEscrow.conf
 ## 🌐 Production Deployment (Vercel)
 
 ### Deploy Frontend to Vercel
-1. Push repo to GitHub (`connectouch-official/Archava`).
+1. Push repo to GitHub (`Archverse0-0/Archava`).
 2. Import project into Vercel Dashboard.
 3. Configure settings:
    * **Framework Preset**: `Vite`

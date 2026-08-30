@@ -6,12 +6,12 @@ Tutorial lengkap dari repo sampai live, termasuk setup AI Voice Concierge "Ava".
 
 ## 1. Yang sudah dilakukan (status sekarang)
 
-- ✅ Repo **private** `connectouch-official/Archava` sudah dibuat
+- ✅ Repo **private** `Archverse0-0/Archava` sudah dibuat
 - ✅ Source `website/` (React + Vite) sudah di-push ke branch `main` (139 file)
 - ✅ `.env` **tidak** ikut ter-push (aman)
 - ✅ `node_modules` (420MB) + `dist` sudah di-ignore
 
-Repo: `https://github.com/connectouch-official/Archava`
+Repo: `https://github.com/Archverse0-0/Archava`
 
 ---
 
@@ -19,8 +19,8 @@ Repo: `https://github.com/connectouch-official/Archava`
 
 1. Buka **https://vercel.com** → login pakai GitHub (akun `haikarure`).
 2. Klik **Add New → Project**.
-3. Di tab **Import Git Repository**, cari `connectouch-official / Archava` → klik **Import**.
-   - Kalau gak kelihatan: klik **Configure GitHub App** → authorize org `connectouch-official` dulu.
+3. Di tab **Import Git Repository**, cari `Archverse0-0 / Archava` → klik **Import**.
+   - Kalau gak kelihatan: klik **Configure GitHub App** → authorize org `Archverse0-0` dulu.
 4. **Project Settings** (Vercel auto-detect Vite, tapi cek):
    - **Framework Preset**: `Vite`
    - **Root Directory**: `/` (biarkan default — repo isinya website langsung)
