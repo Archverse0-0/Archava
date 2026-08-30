@@ -1,0 +1,21 @@
+# Compiler files
+out/
+cache/
+
+# Broadcast files (contain private keys)
+broadcast/
+
+# Dependencies
+lib/
+
+# Dotenv file
+.env
+
+# Certora internal
+certora_internal/
+
+# Slither output
+crytic-export/
+
+# Broadcast files
+broadcast/

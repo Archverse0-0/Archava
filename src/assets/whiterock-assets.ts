@@ -1,0 +1,21 @@
+// Centralized asset paths (files live in /public/assets/whiterock)
+export const logoLight = "/assets/whiterock/logo-light.png";
+export const bgVideo = "/assets/whiterock/bg-video.mp4";
+export const aerialImage = "/assets/whiterock/aerial.jpg";
+export const lagoonBedImage = "/assets/whiterock/lagoon-bed.jpg";
+export const lagoonSofaImage = "/assets/whiterock/lagoon-sofa.jpg";
+export const doubleBedImage = "/assets/whiterock/double-bed.jpg";
+export const singleBedImage = "/assets/whiterock/single-bed.jpg";
+export const spaDaybedImage = "/assets/whiterock/spa-daybed.jpg";
+export const vipCabanaImage = "/assets/whiterock/vip-cabana.jpg";
+export const partyBedImage = "/assets/whiterock/party-bed.jpg";
+export const singleSofaImage = "/assets/whiterock/single-sofa.jpg";
+export const partyVipSuitesImage = "/assets/whiterock/party-vip-suites.jpg";
+export const partyExecSuitesImage = "/assets/whiterock/party-exec-suites.jpg";
+export const eventMondayImage = "/assets/whiterock/event-monday.jpg";
+export const eventTuesdayImage = "/assets/whiterock/event-tuesday.jpg";
+export const eventSundayImage = "/assets/whiterock/event-sunday.jpg";
+export const menuHeroBurger = "/assets/whiterock/menu-hero-burger.jpg";
+export const menuFood = "/assets/whiterock/menu-food.jpg";
+export const menuCocktail = "/assets/whiterock/menu-cocktail.jpg";
+export const menuShisha = "/assets/whiterock/menu-shisha.jpg";

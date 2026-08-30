@@ -1,0 +1,333 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hotel Design System - Luxury & Modern */
+@layer base {
+  :root {
+    /* Core brand colors */
+    --background: 0 0% 98%;
+    --foreground: 220 15% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 20%;
+
+    /* Primary - Deep Navy */
+    --primary: 220 35% 15%;
+    --primary-foreground: 0 0% 98%;
+
+    /* Secondary - Champagne Gold */
+    --secondary: 45 85% 75%;
+    --secondary-foreground: 220 35% 15%;
+
+    /* Muted tones */
+    --muted: 220 15% 95%;
+    --muted-foreground: 220 15% 45%;
+
+    /* Accent - Rich Gold */
+    --accent: 45 90% 60%;
+    --accent-foreground: 220 35% 15%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 15% 90%;
+    --input: 220 15% 90%;
+    --ring: 45 90% 60%;
+
+    /* Luxury gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(220 35% 15% / 0.8), hsl(220 35% 25% / 0.6));
+    --gradient-gold: linear-gradient(135deg, hsl(45 90% 60%), hsl(45 85% 75%));
+    --gradient-card: linear-gradient(135deg, hsl(0 0% 100%), hsl(220 15% 98%));
+    
+    /* Elegant shadows */
+    --shadow-luxury: 0 20px 50px -10px hsl(220 35% 15% / 0.15);
+    --shadow-card: 0 4px 20px -2px hsl(220 35% 15% / 0.08);
+    --shadow-hover: 0 8px 30px -5px hsl(220 35% 15% / 0.2);
+    
+    /* Smooth transitions */
+    --transition-luxury: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ---------- White Rock Design System: Dark Luxe + Gold Glow ---------- */
+@layer base {
+  :root {
+    --gold: 45 90% 60%;
+    --gold-soft: 45 85% 72%;
+    --gold-glow: 45 90% 60%;
+    --champagne: 40 60% 85%;
+    --amber: 35 95% 55%;
+    --bronze: 30 45% 38%;
+    --bg-deep: 222 47% 9%;
+    --bg-elev: 222 40% 13%;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Anchor targets clear the fixed navbar */
+  [id] {
+    scroll-margin-top: 96px;
+  }
+
+  body {
+    font-family: "Outfit", system-ui, sans-serif;
+    background-color: hsl(var(--bg-deep));
+    color: hsl(210 40% 96%);
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: hsl(var(--gold-glow) / 0.35);
+    color: white;
+  }
+}
+
+@layer components {
+  /* Glassmorphism surface */
+  .glass {
+    background: linear-gradient(
+      135deg,
+      hsl(222 40% 14% / 0.55),
+      hsl(222 47% 8% / 0.35)
+    );
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid hsl(210 40% 96% / 0.08);
+  }
+
+  .glass-strong {
+    background: hsl(222 47% 7% / 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid hsl(210 40% 96% / 0.1);
+  }
+
+  .glass-dropdown {
+    background: linear-gradient(
+      135deg,
+      rgba(15, 23, 42, 0.45),
+      rgba(15, 23, 42, 0.25)
+    );
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), 0 0 20px rgba(245, 158, 11, 0.05);
+  }
+
+  /* Gold gradient text */
+  .text-gold {
+    background: linear-gradient(135deg, hsl(var(--gold-soft)), hsl(var(--gold)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-glow-gold {
+    text-shadow: 0 0 28px hsl(var(--gold) / 0.5);
+  }
+
+  /* Gold gradient button surface */
+  .gold-gradient {
+    background: linear-gradient(135deg, hsl(var(--gold-soft)), hsl(var(--gold)));
+    color: hsl(222 47% 8%);
+  }
+
+  /* Hero / section radial ambiance */
+  .ambient {
+    background:
+      radial-gradient(60% 50% at 20% 10%, hsl(var(--gold-glow) / 0.18), transparent 60%),
+      radial-gradient(50% 50% at 90% 20%, hsl(var(--gold) / 0.16), transparent 60%),
+      radial-gradient(70% 60% at 50% 100%, hsl(222 60% 20% / 0.5), transparent 70%);
+  }
+
+  /* Glow border on hover - Snappy 250ms Hardware Accelerated */
+  .glow-card {
+    will-change: transform, border-color, box-shadow;
+    transform: translateZ(0);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 0.25s ease-out, box-shadow 0.25s ease-out, background 0.25s ease-out;
+    border: 1px solid hsl(210 40% 96% / 0.08);
+  }
+  .glow-card:hover {
+    transform: translateY(-6px) translateZ(0);
+    border-color: hsl(var(--gold) / 0.45);
+    box-shadow: 0 20px 40px -15px hsl(var(--gold) / 0.3),
+      0 0 0 1px hsl(var(--gold-glow) / 0.2);
+  }
+
+  .hairline {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--gold) / 0.5),
+      transparent
+    );
+  }
+}
+
+/* Reveal-on-scroll wrapper */
+.reveal {
+  opacity: 0;
+  transform: translateY(42px) scale(0.97);
+  transition: opacity 0.95s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.95s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+@keyframes fadeInUpStagger {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUpStagger 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Shimmer sweep for premium accents */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(0 0% 100% / 0.18),
+    transparent
+  );
+  animation: shimmer 3.5s infinite;
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Marquee track */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.animate-marquee {
+  animation: marquee 32s linear infinite;
+}
+
+/* Floating accent */
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+.animate-floaty {
+  animation: floaty 6s ease-in-out infinite;
+}
+
+/* Pulsing glow ring */
+@keyframes glowPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--gold-glow) / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px hsl(var(--gold-glow) / 0);
+  }
+}
+.animate-glow-pulse {
+  animation: glowPulse 2.4s ease-in-out infinite;
+}

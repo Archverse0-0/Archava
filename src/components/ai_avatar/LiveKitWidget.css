@@ -1,0 +1,64 @@
+.modal-content {
+  background: linear-gradient(160deg, hsl(222 47% 12%), hsl(222 47% 8%));
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 20px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(251, 191, 36, 0.15);
+  padding: 14px;
+  width: 320px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: hidden !important;
+  pointer-events: auto; /* re-enable clicks inside modal */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
+
+.modal-content::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.modal-close {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  background: hsl(222 47% 14%);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  color: #fde68a;
+  font-size: 14px;
+  cursor: pointer;
+  z-index: 2;
+}
+.modal-close:hover { background: hsl(222 47% 20%); }
+
+.connecting-status {
+  position: relative;
+  padding: 14px;
+  text-align: center;
+  color: #e2e8f0;
+}
+
+.connecting-status h3 { color: #e2e8f0; }
+
+.cancel-button {
+  margin-top: 10px;
+  border-radius: 9999px;
+  padding: 8px 18px;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  cursor: pointer;
+}
+.cancel-button:hover { background: rgba(251, 191, 36, 0.25); }
+
+.support-room {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  overflow: hidden !important;
+}
