@@ -14,7 +14,8 @@ interface IWhiteRockPass {
 
 /**
  * @title BookingEscrow
- * @notice Handles daybed reservation deposits in native MON or Mock USDT, 24-hour cancellation refunds, and AI Agent EIP-712 intent execution.
+ * @notice Handles daybed reservation deposits in native MON or the configured USDT token,
+ *         24-hour cancellation refunds, and EIP-712 booking intents.
  */
 contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     using SafeERC20 for IERC20;
@@ -26,10 +27,10 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     struct Booking {
         uint256 bookingId;
         address guest;
-        uint8 daybedType;     // 0: Lagoon, 1: VIP Cabana, 2: Party Suite, 3: Single Sofa
-        uint64 visitTimestamp;// Unix timestamp for visit date (00:00 UTC)
-        uint256 depositAmount;// Deposited MON (18 dec) or USDT (6 dec) amount
-        address paymentToken; // address(0) for native MON, or ERC20 address (e.g. MockUSDT)
+        uint8 daybedType;
+        uint64 visitTimestamp;
+        uint256 depositAmount;
+        address paymentToken;
         bool checkedIn;
         bool cancelled;
         bool settled;
@@ -43,20 +44,18 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     mapping(address => uint256[]) public userBookingIds;
     mapping(address => uint256) public nonces;
 
-    // Base deposit in MON (18 dec) for daybed types: [Lagoon, VIP Cabana, Party Suite, Single Sofa]
     uint256[4] public baseMinSpendMON = [
-        0.01 ether,  // Lagoon Bed (0.01 MON)
-        0.05 ether,  // VIP Cabana (0.05 MON)
-        0.10 ether,  // Party Executive Suite (0.10 MON)
-        0.005 ether  // Single Sofa (0.005 MON)
+        0.01 ether,
+        0.05 ether,
+        0.10 ether,
+        0.005 ether
     ];
 
-    // Base deposit in Mock USDT (6 dec): [Lagoon = 30 USDT, VIP Cabana = 150 USDT, Party Suite = 300 USDT, Single Sofa = 15 USDT]
     uint256[4] public baseMinSpendUSDT = [
-        30 * 10**6,  // Lagoon Bed (30 USDT)
-        150 * 10**6, // VIP Cabana (150 USDT)
-        300 * 10**6, // Party Executive Suite (300 USDT)
-        15 * 10**6   // Single Sofa (15 USDT)
+        30 * 10**6,
+        150 * 10**6,
+        300 * 10**6,
+        15 * 10**6
     ];
 
     event BookingCreated(
@@ -70,6 +69,9 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     event CheckedIn(uint256 indexed bookingId, address indexed guest, uint256 timestamp);
     event BookingCancelled(uint256 indexed bookingId, address indexed guest, uint256 refundAmount);
     event BookingSettled(uint256 indexed bookingId, address venueOwner, uint256 amount);
+    event UsdtTokenUpdated(address indexed token);
+    event BaseMinSpendMONUpdated(uint8 indexed daybedType, uint256 amount);
+    event BaseMinSpendUSDTUpdated(uint8 indexed daybedType, uint256 amount);
 
     error InvalidDeposit();
     error DeadlineExpired();
@@ -78,12 +80,15 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     error AlreadyProcessed();
     error CancellationPeriodExpired();
     error NotGuest();
+    error UnsupportedPaymentToken();
+    error InvalidGuest();
 
     constructor(address _passContract, address _usdtToken, address initialOwner)
         EIP712("WhiteRockBooking", "1")
         Ownable(initialOwner)
     {
         require(_passContract != address(0), "Invalid pass contract address");
+        require(_usdtToken != address(0), "Invalid USDT token address");
         require(initialOwner != address(0), "Invalid owner address");
         passContract = IWhiteRockPass(_passContract);
         usdtToken = IERC20(_usdtToken);
@@ -92,55 +97,48 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     function setUsdtToken(address _usdtToken) external onlyOwner {
         require(_usdtToken != address(0), "Invalid USDT token address");
         usdtToken = IERC20(_usdtToken);
+        emit UsdtTokenUpdated(_usdtToken);
     }
 
-    /**
-     * @notice Calculates required deposit after inspecting user's NFT membership discount on-chain.
-     */
     function calculateDeposit(address guest, uint8 daybedType, address token) public view returns (uint256) {
         require(daybedType < 4, "Invalid daybed type");
-        uint256 baseAmount = (token == address(0)) ? baseMinSpendMON[daybedType] : baseMinSpendUSDT[daybedType];
+        if (guest == address(0)) revert InvalidGuest();
+        if (token != address(0) && token != address(usdtToken)) revert UnsupportedPaymentToken();
 
-        if (address(passContract) != address(0)) {
-            uint16 discountBps = passContract.getDiscountBpsForUser(guest);
-            if (discountBps > 0) {
-                uint256 discount = (baseAmount * discountBps) / 10000;
-                return baseAmount - discount;
-            }
-        }
-        return baseAmount;
+        uint256 baseAmount = token == address(0)
+            ? baseMinSpendMON[daybedType]
+            : baseMinSpendUSDT[daybedType];
+
+        uint16 discountBps = passContract.getDiscountBpsForUser(guest);
+        if (discountBps == 0) return baseAmount;
+
+        uint256 discount = (baseAmount * discountBps) / 10_000;
+        return baseAmount - discount;
     }
 
-    /**
-     * @notice Direct booking deposit in native MON or ERC20 (Mock USDT).
-     */
-    function createBooking(uint8 daybedType, uint64 visitTimestamp, address paymentToken) external payable nonReentrant returns (uint256) {
+    function createBooking(
+        uint8 daybedType,
+        uint64 visitTimestamp,
+        address paymentToken
+    ) external payable nonReentrant returns (uint256) {
         require(visitTimestamp > uint64(block.timestamp), "Visit must be in the future");
         uint256 requiredDeposit = calculateDeposit(msg.sender, daybedType, paymentToken);
 
         if (paymentToken == address(0)) {
             if (msg.value < requiredDeposit) revert InvalidDeposit();
         } else {
-            IERC20(paymentToken).safeTransferFrom(msg.sender, address(this), requiredDeposit);
+            if (msg.value != 0) revert InvalidDeposit();
+            usdtToken.safeTransferFrom(msg.sender, address(this), requiredDeposit);
         }
 
-        uint256 bookingId = nextBookingId++;
-        bookings[bookingId] = Booking({
-            bookingId: bookingId,
-            guest: msg.sender,
-            daybedType: daybedType,
-            visitTimestamp: visitTimestamp,
-            depositAmount: requiredDeposit,
-            paymentToken: paymentToken,
-            checkedIn: false,
-            cancelled: false,
-            settled: false
-        });
+        uint256 bookingId = _storeBooking(
+            msg.sender,
+            daybedType,
+            visitTimestamp,
+            requiredDeposit,
+            paymentToken
+        );
 
-        userBookingIds[msg.sender].push(bookingId);
-        emit BookingCreated(bookingId, msg.sender, daybedType, visitTimestamp, requiredDeposit, paymentToken);
-
-        // Refund excess native MON using low-level call to support smart contract wallets
         if (paymentToken == address(0) && msg.value > requiredDeposit) {
             (bool sent, ) = payable(msg.sender).call{value: msg.value - requiredDeposit}("");
             require(sent, "Failed to refund excess MON");
@@ -150,7 +148,8 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
     }
 
     /**
-     * @notice Execute booking via user EIP-712 signed intent (Generated by AI Ava).
+     * @notice Execute a booking from a guest-signed EIP-712 intent.
+     * @dev The contract, not the signer, remains authoritative for the deposit amount.
      */
     function createBookingWithSignature(
         address guest,
@@ -161,9 +160,14 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
         uint256 deadline,
         bytes calldata signature
     ) external payable nonReentrant returns (uint256) {
+        if (guest == address(0)) revert InvalidGuest();
         require(visitTimestamp > uint64(block.timestamp), "Visit must be in the future");
         if (block.timestamp > deadline) revert DeadlineExpired();
 
+        uint256 requiredDeposit = calculateDeposit(guest, daybedType, paymentToken);
+        if (depositAmount != requiredDeposit) revert InvalidDeposit();
+
+        uint256 nonce = nonces[guest];
         bytes32 structHash = keccak256(
             abi.encode(
                 BOOKING_INTENT_TYPEHASH,
@@ -172,22 +176,48 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
                 visitTimestamp,
                 depositAmount,
                 paymentToken,
-                nonces[guest]++,
+                nonce,
                 deadline
             )
         );
 
         bytes32 digest = _hashTypedDataV4(structHash);
+        if (signature.length != 65) revert InvalidSignature();
         address signer = ECDSA.recover(digest, signature);
         if (signer != guest) revert InvalidSignature();
+        nonces[guest] = nonce + 1;
 
         if (paymentToken == address(0)) {
-            if (msg.value < depositAmount) revert InvalidDeposit();
+            if (msg.value < requiredDeposit) revert InvalidDeposit();
         } else {
-            IERC20(paymentToken).safeTransferFrom(guest, address(this), depositAmount);
+            if (msg.value != 0) revert InvalidDeposit();
+            usdtToken.safeTransferFrom(guest, address(this), requiredDeposit);
         }
 
-        uint256 bookingId = nextBookingId++;
+        uint256 bookingId = _storeBooking(
+            guest,
+            daybedType,
+            visitTimestamp,
+            requiredDeposit,
+            paymentToken
+        );
+
+        if (paymentToken == address(0) && msg.value > requiredDeposit) {
+            (bool sent, ) = payable(msg.sender).call{value: msg.value - requiredDeposit}("");
+            require(sent, "Failed to refund excess MON");
+        }
+
+        return bookingId;
+    }
+
+    function _storeBooking(
+        address guest,
+        uint8 daybedType,
+        uint64 visitTimestamp,
+        uint256 depositAmount,
+        address paymentToken
+    ) internal returns (uint256 bookingId) {
+        bookingId = nextBookingId++;
         bookings[bookingId] = Booking({
             bookingId: bookingId,
             guest: guest,
@@ -199,27 +229,15 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
             cancelled: false,
             settled: false
         });
-
         userBookingIds[guest].push(bookingId);
         emit BookingCreated(bookingId, guest, daybedType, visitTimestamp, depositAmount, paymentToken);
-
-        if (paymentToken == address(0) && msg.value > depositAmount) {
-            (bool sent, ) = payable(msg.sender).call{value: msg.value - depositAmount}("");
-            require(sent, "Failed to refund excess MON");
-        }
-
-        return bookingId;
     }
 
-    /**
-     * @notice Guest can cancel and get 100% refund up to 24 hours prior to visit date.
-     */
     function cancelBooking(uint256 bookingId) external nonReentrant {
         Booking storage b = bookings[bookingId];
         if (b.bookingId == 0) revert BookingNotFound();
         if (b.guest != msg.sender) revert NotGuest();
         if (b.checkedIn || b.cancelled || b.settled) revert AlreadyProcessed();
-
         if (block.timestamp + 24 hours > b.visitTimestamp) revert CancellationPeriodExpired();
 
         b.cancelled = true;
@@ -234,13 +252,10 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
         emit BookingCancelled(bookingId, b.guest, b.depositAmount);
     }
 
-    /**
-     * @notice Admin / Venue Staff triggers check-in on guest arrival, releasing escrow funds to venue.
-     */
-    function checkIn(uint256 bookingId) external onlyOwner {
+    function checkIn(uint256 bookingId) external onlyOwner nonReentrant {
         Booking storage b = bookings[bookingId];
         if (b.bookingId == 0) revert BookingNotFound();
-        if (b.cancelled || b.settled) revert AlreadyProcessed();
+        if (b.checkedIn || b.cancelled || b.settled) revert AlreadyProcessed();
 
         b.checkedIn = true;
         b.settled = true;
@@ -267,11 +282,15 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
 
     function setBaseMinSpendMON(uint8 daybedType, uint256 amountMON) external onlyOwner {
         require(daybedType < 4, "Invalid daybed type");
+        require(amountMON > 0, "Amount must be > 0");
         baseMinSpendMON[daybedType] = amountMON;
+        emit BaseMinSpendMONUpdated(daybedType, amountMON);
     }
 
     function setBaseMinSpendUSDT(uint8 daybedType, uint256 amountUSDT) external onlyOwner {
         require(daybedType < 4, "Invalid daybed type");
+        require(amountUSDT > 0, "Amount must be > 0");
         baseMinSpendUSDT[daybedType] = amountUSDT;
+        emit BaseMinSpendUSDTUpdated(daybedType, amountUSDT);
     }
 }

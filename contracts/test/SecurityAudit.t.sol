@@ -211,7 +211,8 @@ contract SecurityAuditTest is Test {
 
         vm.deal(guestAddr, 1 ether);
         vm.prank(guestAddr);
-        vm.expectRevert(BookingEscrow.InvalidSignature.selector);
+        // Deposit invariant is checked before signature; tampered amount fails first
+        vm.expectRevert(BookingEscrow.InvalidDeposit.selector);
         escrow.createBookingWithSignature(
             guestAddr, 0, visitTs, 0.001 ether, address(0), deadline, sig // different amount
         );
@@ -228,7 +229,8 @@ contract SecurityAuditTest is Test {
 
         vm.deal(guestAddr, 1 ether);
         vm.prank(guestAddr);
-        vm.expectRevert(BookingEscrow.InvalidSignature.selector);
+        // Deposit invariant is checked before signature; different daybed type changes required deposit
+        vm.expectRevert(BookingEscrow.InvalidDeposit.selector);
         escrow.createBookingWithSignature(
             guestAddr, 1, visitTs, 0.01 ether, address(0), deadline, sig // different type
         );
