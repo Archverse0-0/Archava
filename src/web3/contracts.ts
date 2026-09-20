@@ -1,4 +1,3 @@
-// Contract addresses — replace after forge deploy
 export const CONTRACT_ADDRESSES = {
   whiteRockPass: '0x5Bb5A242A2Db2a40592407676FcfcEe94ce7342E' as `0x${string}`,
   bookingEscrow: '0x7FB626bcF2722f45e25EEd445385e2Da34B1077e' as `0x${string}`,
@@ -10,7 +9,7 @@ export const WHITE_ROCK_PASS_ABI = [
     inputs: [{ internalType: 'uint8', name: 'tier', type: 'uint8' }],
     name: 'mintPass',
     outputs: [],
-    stateMutability: 'payable',
+    stateMutability: 'nonpayable',
     type: 'function',
   },
   {
@@ -35,9 +34,7 @@ export const WHITE_ROCK_PASS_ABI = [
     type: 'function',
   },
   {
-    inputs: [
-      { internalType: 'enum WhiteRockPass.PassTier', name: '', type: 'uint8' },
-    ],
+    inputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
     name: 'tierConfigs',
     outputs: [
       { internalType: 'uint256', name: 'price', type: 'uint256' },
@@ -52,6 +49,19 @@ export const WHITE_ROCK_PASS_ABI = [
 ] as const;
 
 export const BOOKING_ESCROW_ABI = [
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'uint256', name: 'bookingId', type: 'uint256' },
+      { indexed: true, internalType: 'address', name: 'guest', type: 'address' },
+      { indexed: false, internalType: 'uint8', name: 'daybedType', type: 'uint8' },
+      { indexed: false, internalType: 'uint64', name: 'visitTimestamp', type: 'uint64' },
+      { indexed: false, internalType: 'uint256', name: 'depositAmount', type: 'uint256' },
+      { indexed: false, internalType: 'address', name: 'paymentToken', type: 'address' },
+    ],
+    name: 'BookingCreated',
+    type: 'event',
+  },
   {
     inputs: [
       { internalType: 'uint8', name: 'daybedType', type: 'uint8' },
@@ -71,6 +81,23 @@ export const BOOKING_ESCROW_ABI = [
     ],
     name: 'calculateDeposit',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    name: 'bookings',
+    outputs: [
+      { internalType: 'uint256', name: 'bookingId', type: 'uint256' },
+      { internalType: 'address', name: 'guest', type: 'address' },
+      { internalType: 'uint8', name: 'daybedType', type: 'uint8' },
+      { internalType: 'uint64', name: 'visitTimestamp', type: 'uint64' },
+      { internalType: 'uint256', name: 'depositAmount', type: 'uint256' },
+      { internalType: 'address', name: 'paymentToken', type: 'address' },
+      { internalType: 'bool', name: 'checkedIn', type: 'bool' },
+      { internalType: 'bool', name: 'cancelled', type: 'bool' },
+      { internalType: 'bool', name: 'settled', type: 'bool' },
+    ],
     stateMutability: 'view',
     type: 'function',
   },
@@ -105,17 +132,22 @@ export const BOOKING_ESCROW_ABI = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  {
+    inputs: [{ internalType: 'uint256', name: 'bookingId', type: 'uint256' }],
+    name: 'checkIn',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;
 
-// Daybed type mapping for the UI
 export const DAYBED_TYPES = [
   { id: 0, name: 'Lagoon Bed', minSpend: '0.01 MON', minSpendUsdt: '30 USDT' },
-  { id: 1, name: 'VIP Cabana', minSpend: '0.05 MON', minSpendUsdt: '270 USDT' },
-  { id: 2, name: 'Party Executive Suite', minSpend: '0.10 MON', minSpendUsdt: '480 USDT' },
-  { id: 3, name: 'Single Sofa', minSpend: '0.005 MON', minSpendUsdt: '18 USDT' },
+  { id: 1, name: 'VIP Cabana', minSpend: '0.05 MON', minSpendUsdt: '150 USDT' },
+  { id: 2, name: 'Party Executive Suite', minSpend: '0.10 MON', minSpendUsdt: '300 USDT' },
+  { id: 3, name: 'Single Sofa', minSpend: '0.005 MON', minSpendUsdt: '15 USDT' },
 ] as const;
 
-// Pass tier mapping
 export const PASS_TIERS = [
   { id: 0, name: 'Lagoon Pass', price: '10 USDT', discount: '5%' },
   { id: 1, name: 'VIP Cabana Pass', price: '50 USDT', discount: '10%' },
