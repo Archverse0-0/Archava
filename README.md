@@ -145,7 +145,18 @@ LIVEKIT_API_KEY=your_livekit_api_key
 LIVEKIT_API_SECRET=your_livekit_api_secret
 
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.1-flash-live-preview
+GEMINI_VOICE=Kore
+
+# Optional. Ava automatically continues in voice-only mode when Tavus is
+# unconfigured or unavailable.
 TAVUS_API_KEY=your_tavus_api_key
+FACE_ID=your_tavus_face_id
+PAL_ID=
+TAVUS_ENABLED=true
+
+# Optional MCP integration. Leave blank to disable.
+N8N_MCP_SERVER_URL=
 
 GMAIL_SENDER_EMAIL=your_email@gmail.com
 GMAIL_APP_PASSWORD=your_gmail_app_password
@@ -212,17 +223,19 @@ npm run dev -- --host
 
 ---
 
-## ⚡ Quick Start (Developer One-Liner)
+## ⚡ Quick Start (One Command)
 
-You can launch all 3 services concurrently in background processes using:
+After the one-time dependency setup above, launch all three services with:
 
 ```bash
-# Terminal 1: Launch Backend API + Agent Worker
-(cd backend && ../.venv/bin/python server.py & ../.venv/bin/python agent.py dev)
-
-# Terminal 2: Launch Frontend Web App
-npm run dev -- --host
+npm run dev:all
 ```
+
+Press `Ctrl+C` once to stop the frontend, token API, and Ava worker together.
+If Tavus has no conversational credits, the UI automatically switches to
+Gemini voice-only mode instead of remaining stuck on the video loading screen.
+Set `TAVUS_ENABLED=false` to skip Tavus entirely; change it back to `true` after
+restoring conversational credits.
 
 ---
 

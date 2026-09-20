@@ -21,12 +21,17 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
   const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
   const localParticipant = useLocalParticipant();
   const [pendingBooking, setPendingBooking] = useState(null);
+  const [avatarStatus, setAvatarStatus] = useState("connecting");
 
   const handleDataReceived = useCallback((payload, participant, kind, topic) => {
     try {
       const decoded = typeof payload === "string" ? payload : new TextDecoder().decode(payload);
       const data = JSON.parse(decoded);
       console.log("[ai-avatar] Received room data packet:", data, "topic:", topic);
+      if (data && data.action === "avatar_status") {
+        setAvatarStatus(data.status || "voice_only");
+        return;
+      }
       if (data && data.action === "disconnect") {
         console.log("[ai-avatar] Disconnect action received from agent, scheduling room disconnect in 3.5s...");
         setTimeout(() => {
@@ -135,7 +140,13 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
   });
 
   const trackRefs = useTracks([Track.Source.Camera]);
-  const localCamTrackRef = trackRefs.find((trackRef) => trackRef.participant.name === 'tavus-avatar-agent') ?? trackRefs.find((t) => t.participant.isAgent);
+  const localCamTrackRef = trackRefs.find(
+    (trackRef) => trackRef.participant.identity === "tavus-avatar-agent"
+  ) ?? trackRefs.find((t) => t.participant.isAgent);
+
+  useEffect(() => {
+    if (localCamTrackRef) setAvatarStatus("ready");
+  }, [localCamTrackRef]);
 
   const stateLabel = {
     disconnected: "Ready — press mic to talk",
@@ -173,6 +184,20 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
       <div className="relative w-full rounded-2xl overflow-hidden border border-amber-400/30 bg-slate-950/90 shadow-2xl flex flex-col items-center justify-center p-4 min-h-[190px]">
         {localCamTrackRef ? (
           <VideoTrack trackRef={localCamTrackRef} className="w-full h-full object-cover rounded-xl" />
+        ) : avatarStatus === "voice_only" ? (
+          <div className="flex flex-col items-center justify-center text-center space-y-3 py-4">
+            <div className="h-16 w-16 rounded-full gold-gradient flex items-center justify-center shadow-[0_0_25px_rgba(252,211,77,0.5)] border-2 border-amber-300">
+              <Mic className="h-8 w-8 text-slate-950 stroke-[2.5]" />
+            </div>
+            <div>
+              <p className="font-cinzel text-xs font-bold text-amber-300 uppercase tracking-wider">
+                Ava Voice Mode Active
+              </p>
+              <p className="text-[11px] text-slate-400 font-light mt-1">
+                Video unavailable — say hello to begin
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center text-center space-y-3 py-4">
             <div className="relative">

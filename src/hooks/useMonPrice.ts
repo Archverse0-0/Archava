@@ -25,7 +25,9 @@ export function useMonPrice() {
           return;
         }
       }
-    } catch {}
+    } catch {
+      // Ignore cache errors
+    }
 
     fetch(COINGECKO_API)
       .then((r) => r.json())

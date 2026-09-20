@@ -29,3 +29,6 @@ dist-ssr
 .venv/
 __pycache__/
 *.py[cod]
+
+# Test coverage
+coverage/

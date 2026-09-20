@@ -41,8 +41,9 @@ export default function StaffCheckIn() {
       });
       setResult({ success: true, txHash: hash });
       refetch();
-    } catch (err: any) {
-      setResult({ success: false, error: err.message?.slice(0, 200) || "Check-in failed" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Check-in failed";
+      setResult({ success: false, error: message.slice(0, 200) });
     }
     setIsChecking(false);
   };

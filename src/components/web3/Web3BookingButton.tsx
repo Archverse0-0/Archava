@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useAccount, useWriteContract, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
@@ -87,7 +87,7 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
     setStep("idle");
   };
 
-  const handleBooking = async () => {
+  const handleBooking = useCallback(async () => {
     if (!depositUsdt || !dateString || !address) return;
 
     setStep("approving");
@@ -119,7 +119,7 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
       console.error("Booking failed:", err);
     }
     setStep("idle");
-  };
+  }, [depositUsdt, dateString, address, daybedType, writeContractAsync, onSuccess]);
 
   // Auto-trigger Rabby / Wallet popup when autoSign prop is true and balance is ready
   React.useEffect(() => {
@@ -127,7 +127,7 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
       console.log("[web3] Voice auto-sign triggered! Opening Rabby / Wallet signature popup...");
       handleBooking();
     }
-  }, [autoSign, isConnected, usdtBalance, depositUsdt]);
+  }, [autoSign, isConnected, usdtBalance, depositUsdt, step, handleBooking]);
 
   if (!isConnected) {
     return (

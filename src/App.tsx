@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,32 +12,43 @@ import LiveKitWidget from "@/components/ai_avatar/LiveKitWidget";
 import { Button } from "@/components/ui/button";
 import { MessageCircle } from "lucide-react";
 
-import Index from "./pages/Index";
-import DaybedsSuites from "./pages/DaybedsSuites";
-import Dining from "./pages/Dining";
-import Experiences from "./pages/Experiences";
-import WeddingsMice from "./pages/WeddingsMice";
-import Mice from "./pages/Mice";
-import Wedding from "./pages/Wedding";
-import Events from "./pages/Events";
-import Merch from "./pages/Merch";
-import LiveWeather from "./pages/LiveWeather";
-import Contact from "./pages/Contact";
-import NYE from "./pages/NYE";
-import Faq from "./pages/Faq";
-import Careers from "./pages/Careers";
-import SpaWellness from "./pages/SpaWellness";
-import Booking from "./pages/Booking";
-import BookingConfirmation from "./pages/BookingConfirmation";
-import MyBookings from "./pages/MyBookings";
-import StaffCheckIn from "./pages/StaffCheckIn";
-import Entertainment from "./pages/Entertainment";
-import SpecialOffers from "./pages/SpecialOffers";
-import Partnerships from "./pages/Partnerships";
-import PastEvents from "./pages/PastEvents";
-import BaliGuide from "./pages/BaliGuide";
-import MediaCoverage from "./pages/MediaCoverage";
-import NotFound from "./pages/NotFound";
+// Lazy load all pages for code splitting
+const Index = lazy(() => import("./pages/Index"));
+const DaybedsSuites = lazy(() => import("./pages/DaybedsSuites"));
+const Dining = lazy(() => import("./pages/Dining"));
+const Experiences = lazy(() => import("./pages/Experiences"));
+const WeddingsMice = lazy(() => import("./pages/WeddingsMice"));
+const Mice = lazy(() => import("./pages/Mice"));
+const Wedding = lazy(() => import("./pages/Wedding"));
+const Events = lazy(() => import("./pages/Events"));
+const Merch = lazy(() => import("./pages/Merch"));
+const LiveWeather = lazy(() => import("./pages/LiveWeather"));
+const Contact = lazy(() => import("./pages/Contact"));
+const NYE = lazy(() => import("./pages/NYE"));
+const Faq = lazy(() => import("./pages/Faq"));
+const Careers = lazy(() => import("./pages/Careers"));
+const SpaWellness = lazy(() => import("./pages/SpaWellness"));
+const Booking = lazy(() => import("./pages/Booking"));
+const BookingConfirmation = lazy(() => import("./pages/BookingConfirmation"));
+const MyBookings = lazy(() => import("./pages/MyBookings"));
+const StaffCheckIn = lazy(() => import("./pages/StaffCheckIn"));
+const Entertainment = lazy(() => import("./pages/Entertainment"));
+const SpecialOffers = lazy(() => import("./pages/SpecialOffers"));
+const Partnerships = lazy(() => import("./pages/Partnerships"));
+const PastEvents = lazy(() => import("./pages/PastEvents"));
+const BaliGuide = lazy(() => import("./pages/BaliGuide"));
+const MediaCoverage = lazy(() => import("./pages/MediaCoverage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+
+// Loading fallback component
+const PageLoader = () => (
+  <div className="min-h-[60vh] flex items-center justify-center">
+    <div className="flex flex-col items-center gap-4 text-slate-400">
+      <div className="h-12 w-12 border-4 border-amber-300/30 border-t-amber-300 rounded-full animate-spin" />
+      <p className="font-cinzel text-sm uppercase tracking-wider">Loading...</p>
+    </div>
+  </div>
+);
 
 const queryClient = new QueryClient();
 
@@ -97,36 +108,38 @@ const GlobalLayout = () => {
       <Navbar />
 
       <main>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/daybeds-suites" element={<Index />} />
-          <Route path="/dining" element={<Dining />} />
-          <Route path="/menu" element={<Dining />} />
-          <Route path="/experiences" element={<Experiences />} />
-          <Route path="/spa-wellness" element={<SpaWellness />} />
-          <Route path="/weddings-mice" element={<WeddingsMice />} />
-          <Route path="/mice-wedding" element={<WeddingsMice />} />
-          <Route path="/mice" element={<Mice />} />
-          <Route path="/wedding" element={<Wedding />} />
-          <Route path="/events" element={<Events />} />
-          <Route path="/merch" element={<Merch />} />
-          <Route path="/live-weather" element={<LiveWeather />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/nye" element={<NYE />} />
-          <Route path="/faq" element={<Faq />} />
-          <Route path="/careers" element={<Careers />} />
-          <Route path="/entertainment" element={<Entertainment />} />
-          <Route path="/special-offers" element={<SpecialOffers />} />
-          <Route path="/partnerships" element={<Partnerships />} />
-          <Route path="/past-events" element={<PastEvents />} />
-          <Route path="/bali-guide" element={<BaliGuide />} />
-          <Route path="/media-coverage" element={<MediaCoverage />} />
-          <Route path="/booking" element={<Booking />} />
-          <Route path="/bookingconfirmation" element={<BookingConfirmation />} />
-          <Route path="/my-bookings" element={<MyBookings />} />
-          <Route path="/staff-checkin" element={<StaffCheckIn />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/daybeds-suites" element={<Index />} />
+            <Route path="/dining" element={<Dining />} />
+            <Route path="/menu" element={<Dining />} />
+            <Route path="/experiences" element={<Experiences />} />
+            <Route path="/spa-wellness" element={<SpaWellness />} />
+            <Route path="/weddings-mice" element={<WeddingsMice />} />
+            <Route path="/mice-wedding" element={<WeddingsMice />} />
+            <Route path="/mice" element={<Mice />} />
+            <Route path="/wedding" element={<Wedding />} />
+            <Route path="/events" element={<Events />} />
+            <Route path="/merch" element={<Merch />} />
+            <Route path="/live-weather" element={<LiveWeather />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/nye" element={<NYE />} />
+            <Route path="/faq" element={<Faq />} />
+            <Route path="/careers" element={<Careers />} />
+            <Route path="/entertainment" element={<Entertainment />} />
+            <Route path="/special-offers" element={<SpecialOffers />} />
+            <Route path="/partnerships" element={<Partnerships />} />
+            <Route path="/past-events" element={<PastEvents />} />
+            <Route path="/bali-guide" element={<BaliGuide />} />
+            <Route path="/media-coverage" element={<MediaCoverage />} />
+            <Route path="/booking" element={<Booking />} />
+            <Route path="/bookingconfirmation" element={<BookingConfirmation />} />
+            <Route path="/my-bookings" element={<MyBookings />} />
+            <Route path="/staff-checkin" element={<StaffCheckIn />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </main>
 
       <Footer />

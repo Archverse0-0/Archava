@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Flask Token Server
+  token-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: archava-token-server
+    ports:
+      - "5001:5001"
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # LiveKit Agent Worker (Ava)
+  agent-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.agent
+    container_name: archava-agent-worker
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-flash-live-preview}
+      - GEMINI_VOICE=${GEMINI_VOICE:-Kore}
+      - TAVUS_API_KEY=${TAVUS_API_KEY}
+      - TAVUS_ENABLED=${TAVUS_ENABLED:-true}
+      - FACE_ID=${FACE_ID}
+      - PAL_ID=${PAL_ID}
+      - N8N_MCP_SERVER_URL=${N8N_MCP_SERVER_URL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+    depends_on:
+      - token-server
+
+  # Frontend (Nginx for production)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: archava-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - VITE_LIVEKIT_URL=${VITE_LIVEKIT_URL}
+    restart: unless-stopped
+    depends_on:
+      - token-server
+
+networks:
+  default:
+    name: archava-network
+
+volumes:
+  # No persistent volumes needed for stateless services

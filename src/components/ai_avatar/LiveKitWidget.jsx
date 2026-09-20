@@ -14,9 +14,12 @@ const LiveKitWidget = ({ setShowSupport }) => {
   const getToken = useCallback(async () => {
     setError(null);
     setIsConnecting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await fetch(
-        `/api/getToken?name=${encodeURIComponent("admin")}`
+        `/api/getToken?name=${encodeURIComponent("admin")}`,
+        { signal: controller.signal }
       );
       if (!response.ok) throw new Error(`token ${response.status}`);
       const token = (await response.text()).trim();
@@ -25,8 +28,10 @@ const LiveKitWidget = ({ setShowSupport }) => {
       setIsConnecting(false);
     } catch (err) {
       console.error("Ava token error:", err);
-      setError(err.message || "connection failed");
+      setError(err.name === "AbortError" ? "token request timed out" : (err.message || "connection failed"));
       setIsConnecting(false);
+    } finally {
+      clearTimeout(timeout);
     }
   }, []);
 

@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, ElementType } from "react";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import { cn } from "@/lib/utils";
 
@@ -6,13 +6,13 @@ type RevealProps = {
   children: ReactNode;
   className?: string;
   delay?: number;
-  as?: "div" | "section" | "li" | "article";
+  as?: ElementType;
   id?: string;
 };
 
 export function Reveal({ children, className, delay = 0, as = "div", id }: RevealProps) {
-  const { ref, visible } = useScrollReveal<HTMLDivElement>();
-  const Tag = as as any;
+  const { ref, visible } = useScrollReveal<HTMLElement>();
+  const Tag = as;
   return (
     <Tag
       ref={ref}

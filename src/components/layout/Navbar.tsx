@@ -31,12 +31,21 @@ import {
 // Mirror persis top-nav whiterockbali.com (scrape 2026-08):
 // Entertainment, Daybed & Suites, Menu, Mice & Wedding, Spa & Wellness,
 // Merchandise, Experiences, News (dropdown), NYE 2026, Eng (dropdown).
-const NAV: {
+type NavIcon = React.ComponentType<{ className?: string }>;
+
+interface NavItem {
   label: { id: string; en: string; ru?: string; ko?: string };
   to?: string;
   href?: string;
-  children?: { label: { id: string; en: string; ru?: string; ko?: string }; to?: string; href?: string; icon?: any }[];
-}[] = [
+  children?: {
+    label: { id: string; en: string; ru?: string; ko?: string };
+    to?: string;
+    href?: string;
+    icon?: NavIcon;
+  }[];
+}
+
+const NAV: NavItem[] = [
   { label: { id: "Entertainment", en: "Entertainment", ru: "Развлечения", ko: "엔터테인먼트" }, to: "/entertainment" },
   { label: { id: "Daybed & Suite", en: "Daybed & Suites", ru: "Шезлонги и люксы", ko: "데이베드 및 스위트" }, to: "/#daybeds" },
   { label: { id: "Menu", en: "Menu", ru: "Меню", ko: "메뉴" }, to: "/dining" },

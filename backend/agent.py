@@ -1,17 +1,51 @@
 from dotenv import load_dotenv
-from prompts import AGENT_INSTRUCTION, SESSION_INSTRUCTION
+from prompts import AGENT_INSTRUCTION
 from livekit import agents
-from livekit.agents import AgentSession, Agent, RoomInputOptions
-from livekit.plugins import (
-    google,  # Gemini Live realtime (voice brain) — drop-in buat OpenAI Realtime
-    noise_cancellation,
-)
+from livekit.agents import APIConnectOptions, AgentSession, Agent, room_io
+from livekit.plugins import google
 from mcp_client import MCPServerSse
 from mcp_client.agent_tools import MCPToolsIntegration
+import json
 import os
 from tools import open_browser, send_booking_email, close_session, check_room_availability, trigger_web3_booking, sign_web3_transaction
 from livekit.plugins import tavus
 load_dotenv()
+
+
+def optional_env(name: str) -> str | None:
+    """Return configured optional values while ignoring checked-in placeholders."""
+    value = os.environ.get(name, "").strip()
+    if not value or value.lower().startswith("your_") or ".example" in value.lower():
+        return None
+    return value
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def create_session() -> AgentSession:
+    return AgentSession(
+        llm=google.realtime.RealtimeModel(
+            model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-live-preview"),
+            api_key=os.environ.get("GEMINI_API_KEY"),
+            voice=os.environ.get("GEMINI_VOICE", "Kore"),
+            # Gemini 3.1 does not accept mid-session instruction updates.
+            instructions=AGENT_INSTRUCTION,
+        )
+    )
+
+
+async def publish_avatar_status(ctx: agents.JobContext, status: str) -> None:
+    payload = json.dumps({"action": "avatar_status", "status": status}).encode("utf-8")
+    await ctx.room.local_participant.publish_data(
+        payload,
+        reliable=True,
+        topic="avatar_status",
+    )
 
 
 class Assistant(Agent):
@@ -23,19 +57,13 @@ class Assistant(Agent):
 
 
 async def entrypoint(ctx: agents.JobContext):
-    session = AgentSession(
-        llm=google.realtime.RealtimeModel(
-            model="gemini-3.1-flash-live-preview",  # native audio, realtime
-            api_key=os.environ.get("GEMINI_API_KEY"),
-            voice=os.environ.get("GEMINI_VOICE", "Kore"),  # Female voice (Kore / Aoede)
-        )
-    )
+    session = create_session()
 
-    mcp_url = os.environ.get("N8N_MCP_SERVER_URL")
-    if mcp_url and mcp_url.strip():
+    mcp_url = optional_env("N8N_MCP_SERVER_URL")
+    if mcp_url:
         try:
             mcp_server = MCPServerSse(
-                params={"url": mcp_url.strip()},
+                params={"url": mcp_url},
                 cache_tools_list=True,
                 name="SSE MCP Server"
             )
@@ -49,51 +77,65 @@ async def entrypoint(ctx: agents.JobContext):
     else:
         agent = Assistant()
 
-    # Tavus avatar — opsional: kalau TAVUS_API_KEY kosong, jalan voice-only
-    # URUTAN BENAR (livekit-agents 1.6.8):
-    # 1. ctx.connect()  -> agent join room sebagai participant
-    # 2. session.start() -> RoomIO link ke participant USER (admin), BUKAN avatar
-    # 3. avatar.start()  -> avatar join belakangan (gak jadi input source = no feedback loop)
-    tavus_key = os.environ.get("TAVUS_API_KEY")
+    # Tavus is optional. Any provider/quota failure falls back to Gemini voice-only.
+    tavus_enabled = env_flag("TAVUS_ENABLED", default=True)
+    tavus_key = optional_env("TAVUS_API_KEY")
+    face_id = optional_env("FACE_ID")
+    pal_id = optional_env("PAL_ID")
     avatar = None
-    if tavus_key and os.environ.get("FACE_ID"):
+    if tavus_enabled and tavus_key and face_id:
         avatar = tavus.AvatarSession(
-            # Tavus API (pipeline full) — face_id = wajah, pal_id = persona
-            face_id=os.environ.get("FACE_ID"),
-            pal_id=os.environ.get("PAL_ID") or None,  # None = izin default
+            face_id=face_id,
+            pal_id=pal_id,
             api_key=tavus_key,
+            # Do not retry non-recoverable provider errors (for example HTTP 402)
+            # three times before enabling voice-only mode.
+            conn_options=APIConnectOptions(max_retry=1, retry_interval=0.5, timeout=8.0),
         )
 
     await ctx.connect()
 
+    avatar_status = "voice_only"
+    if avatar is not None:
+        try:
+            # Current LiveKit avatar lifecycle: start and join the avatar before
+            # starting AgentSession so its audio output is routed correctly.
+            await avatar.start(session, room=ctx.room)
+            await avatar.wait_for_join(timeout=20.0)
+            avatar_status = "ready"
+            print("[agent] Tavus avatar connected", flush=True)
+        except Exception as exc:
+            print(
+                f"[agent] Tavus unavailable ({type(exc).__name__}); continuing voice-only",
+                flush=True,
+            )
+            await avatar.aclose()
+            avatar = None
+            # AvatarSession may replace the audio output after its API call.
+            # A fresh session guarantees that fallback audio goes to the room.
+            session = create_session()
+    else:
+        reason = "disabled" if not tavus_enabled else "not configured"
+        print(f"[agent] Tavus {reason}; continuing voice-only", flush=True)
+
     await session.start(
         room=ctx.room,
         agent=agent,
-        room_input_options=RoomInputOptions(
-            # WAJIB: link ke user (identity "admin" dari frontend), bukan avatar
+        room_options=room_io.RoomOptions(
             participant_identity="admin",
-            # LiveKit Cloud enhanced noise cancellation
-            # - If self-hosting, omit this parameter
-            # - For telephony applications, use `BVCTelephony` for best results
-            # noise_cancellation=noise_cancellation.BVC(),  # self-host: omit
+            close_on_disconnect=True,
         ),
     )
 
-    import asyncio
-    if avatar is not None:
-        # Start Tavus avatar in background task so voice conversation connects instantly (<1s)
-        asyncio.create_task(avatar.start(session, room=ctx.room))
-        print("[agent] Tavus avatar initialization started in background", flush=True)
-    else:
-        print("[agent] Tavus FACE_ID kosong -> voice-only mode", flush=True)
-
     try:
-        await session.say("Halo! Selamat datang di White Rock Beach Club. Saya Ava, concierge AI kamu. Ada yang bisa Ava bantu hari ini?", allow_interruptions=True)
-        print("[agent] Initial greeting spoken successfully", flush=True)
-    except Exception as e:
-        print(f"[agent] Initial reply trigger note: {e}", flush=True)
+        await publish_avatar_status(ctx, avatar_status)
+    except Exception as exc:
+        print(f"[agent] Could not publish avatar status: {exc}", flush=True)
 
-    print("[agent] entrypoint selesai", flush=True)
+    # Gemini 3.1 native audio cannot use AgentSession.say() without a separate
+    # TTS/audio source. The first user utterance triggers the greeting rules in
+    # AGENT_INSTRUCTION.
+    print(f"[agent] ready ({avatar_status})", flush=True)
 
 
 if __name__ == "__main__":
