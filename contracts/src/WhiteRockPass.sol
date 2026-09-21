@@ -72,6 +72,9 @@ contract WhiteRockPass is ERC721Enumerable, Ownable {
         // USDT price as wei.
     }
 
+    /// @dev Bookings are always settled in the token recorded on the booking
+    /// itself, so repointing `usdtToken` never strands an existing booking. A
+    /// balance of a superseded token is recoverable through `withdrawToken`.
     function setUsdtToken(address _usdtToken) external onlyOwner {
         require(_usdtToken != address(0), "Invalid USDT token address");
         usdtToken = IERC20(_usdtToken);
@@ -180,5 +183,18 @@ contract WhiteRockPass is ERC721Enumerable, Ownable {
         uint256 balance = usdtToken.balanceOf(address(this));
         require(balance > 0, "No USDT balance to withdraw");
         usdtToken.safeTransfer(owner(), balance);
+    }
+
+    /// @notice Sweeps an arbitrary ERC-20 balance to the owner.
+    /// @dev `setUsdtToken` repoints the contract at a new token, so any balance
+    /// left of the previous one would be unreachable by `withdrawUSDT`, which
+    /// only ever reads the *current* token. This escape hatch keeps a token
+    /// migration from permanently stranding funds (and also recovers tokens sent
+    /// here by mistake).
+    function withdrawToken(address token) external onlyOwner {
+        require(token != address(0), "Invalid token address");
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        require(balance > 0, "No token balance to withdraw");
+        IERC20(token).safeTransfer(owner(), balance);
     }
 }

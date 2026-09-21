@@ -94,10 +94,22 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
         usdtToken = IERC20(_usdtToken);
     }
 
+    /// @dev Only *new* bookings price against the new token. Existing bookings
+    /// carry their own `paymentToken` and are refunded/settled against that, so
+    /// a change here cannot strand an in-flight booking. `withdrawToken` exists
+    /// for balances of a token that is no longer the configured one.
     function setUsdtToken(address _usdtToken) external onlyOwner {
         require(_usdtToken != address(0), "Invalid USDT token address");
         usdtToken = IERC20(_usdtToken);
         emit UsdtTokenUpdated(_usdtToken);
+    }
+
+    /// @notice Sweeps an arbitrary ERC-20 balance to the owner.
+    function withdrawToken(address token) external onlyOwner {
+        require(token != address(0), "Invalid token address");
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        require(balance > 0, "No token balance to withdraw");
+        IERC20(token).safeTransfer(owner(), balance);
     }
 
     function calculateDeposit(address guest, uint8 daybedType, address token) public view returns (uint256) {

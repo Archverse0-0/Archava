@@ -427,7 +427,59 @@ contract WhiteRockPassTest is Test {
     }
 
     function testFuzz_getDiscountBps_neverExceedsMax(address user) public view {
+        // ERC721.balanceOf(address(0)) reverts by design, so the zero address
+        // is outside this view's domain rather than a case it must return 0 for.
+        vm.assume(user != address(0));
         uint16 discount = pass.getDiscountBpsForUser(user);
         assertLe(discount, 10000);
+    }
+
+    // ============================================================
+    // setUsdtToken / withdrawToken
+    // ============================================================
+
+    /// Repointing the payment token must not strand whatever balance of the
+    /// previous token the contract is still holding.
+    function test_withdrawToken_recoversSupersededTokenBalance() public {
+        usdt.mint(address(pass), 500 * 10**6);
+
+        MockUSDT usdtV2 = new MockUSDT(owner);
+        pass.setUsdtToken(address(usdtV2));
+
+        // withdrawUSDT() now reads the new token and would leave the old
+        // balance stuck forever.
+        assertEq(usdt.balanceOf(address(pass)), 500 * 10**6);
+
+        uint256 ownerBefore = usdt.balanceOf(owner);
+        pass.withdrawToken(address(usdt));
+        assertEq(usdt.balanceOf(address(pass)), 0);
+        assertEq(usdt.balanceOf(owner), ownerBefore + 500 * 10**6);
+    }
+
+    function test_withdrawToken_recoversTokenSentByMistake() public {
+        MockUSDT stray = new MockUSDT(owner);
+        stray.mint(address(pass), 42 * 10**6);
+
+        uint256 ownerBefore = stray.balanceOf(owner);
+        pass.withdrawToken(address(stray));
+        assertEq(stray.balanceOf(address(pass)), 0);
+        assertEq(stray.balanceOf(owner), ownerBefore + 42 * 10**6);
+    }
+
+    function test_withdrawToken_revertsForZeroAddress() public {
+        vm.expectRevert("Invalid token address");
+        pass.withdrawToken(address(0));
+    }
+
+    function test_withdrawToken_revertsWhenBalanceIsZero() public {
+        vm.expectRevert("No token balance to withdraw");
+        pass.withdrawToken(address(usdt));
+    }
+
+    function test_withdrawToken_revertsForNonOwner() public {
+        usdt.mint(address(pass), 100 * 10**6);
+        vm.prank(alice);
+        vm.expectRevert();
+        pass.withdrawToken(address(usdt));
     }
 }
