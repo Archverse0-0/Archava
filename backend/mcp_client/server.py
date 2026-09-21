@@ -1,14 +1,18 @@
 import asyncio
-from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from typing import Any, Dict, List, Optional, Tuple
 import logging
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from typing import Any, cast
 
-# Import from the installed mcp package
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-import mcp.types
-from mcp.types import CallToolResult, JSONRPCMessage, Tool as MCPTool
-from mcp.client.sse import sse_client
+
+# ``agent.py`` puts the backend package root on sys.path before importing this
+# module, so the shared degradation helper resolves as a top-level module.
+from degradation import degraded
 from mcp.client.session import ClientSession
+from mcp.client.sse import sse_client
+from mcp.types import CallToolResult, JSONRPCMessage
+from mcp.types import Tool as MCPTool
+
 
 # Base class for MCP servers
 class MCPServer:
@@ -21,11 +25,11 @@ class MCPServer:
         """A readable name for the server."""
         raise NotImplementedError
 
-    async def list_tools(self) -> List[MCPTool]:
+    async def list_tools(self) -> list[MCPTool]:
         """List the tools available on the server."""
         raise NotImplementedError
 
-    async def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> CallToolResult:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
         """Invoke a tool on the server."""
         raise NotImplementedError
 
@@ -46,20 +50,20 @@ class _MCPServerWithClientSession(MCPServer):
             if you know the server will not change its tools list, because it can drastically
             improve latency.
         """
-        self.session: Optional[ClientSession] = None
+        self.session: ClientSession | None = None
         self.exit_stack: AsyncExitStack = AsyncExitStack()
         self._cleanup_lock: asyncio.Lock = asyncio.Lock()
         self.cache_tools_list = cache_tools_list
 
         # The cache is always dirty at startup, so that we fetch tools at least once
         self._cache_dirty = True
-        self._tools_list: Optional[List[MCPTool]] = None
+        self._tools_list: list[MCPTool] | None = None
         self.logger = logging.getLogger(__name__)
 
     def create_streams(
         self,
     ) -> AbstractAsyncContextManager[
-        Tuple[
+        tuple[
             MemoryObjectReceiveStream[JSONRPCMessage | Exception],
             MemoryObjectSendStream[JSONRPCMessage],
         ]
@@ -92,7 +96,7 @@ class _MCPServerWithClientSession(MCPServer):
             await self.cleanup()
             raise
 
-    async def list_tools(self) -> List[MCPTool]:
+    async def list_tools(self) -> list[MCPTool]:
         """List the tools available on the server."""
         if not self.session:
             raise RuntimeError("Server not initialized. Make sure you call connect() first.")
@@ -113,7 +117,7 @@ class _MCPServerWithClientSession(MCPServer):
             self.logger.error(f"Error listing tools: {e}")
             raise
 
-    async def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> CallToolResult:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
         """Invoke a tool on the server."""
         if not self.session:
             raise RuntimeError("Server not initialized. Make sure you call connect() first.")
@@ -122,22 +126,29 @@ class _MCPServerWithClientSession(MCPServer):
         try:
             return await self.session.call_tool(tool_name, arguments)
         except Exception as e:
-            self.logger.error(f"Error calling tool {tool_name}: {e}")
+            # A transport error can quote the request it was carrying, which
+            # would put the tool's arguments (guest name, email, booking
+            # reference) into the log. The exception type plus the tool name is
+            # enough to diagnose the failure; the full text moves to DEBUG.
+            self.logger.error(
+                "Error calling tool %s: %s", tool_name, type(e).__name__
+            )
+            self.logger.debug("Error calling tool %s detail: %s", tool_name, e)
             raise
 
     async def cleanup(self):
         """Cleanup the server."""
         async with self._cleanup_lock:
-            try:
+            # Closing the transport is best-effort: a half-open SSE connection
+            # must not prevent the session from being torn down.
+            with degraded(f"MCP server {self.name}", "cleanup"):
                 await self.exit_stack.aclose()
                 self.session = None
                 self.logger.info(f"Cleaned up MCP server: {self.name}")
-            except Exception as e:
-                self.logger.error(f"Error cleaning up server: {e}")
 
 # Define parameter types for clarity
-MCPServerSseParams = Dict[str, Any]
-MCPServerStdioParams = Dict[str, Any]
+MCPServerSseParams = dict[str, Any]
+MCPServerStdioParams = dict[str, Any]
 
 # SSE server implementation
 class MCPServerSse(_MCPServerWithClientSession):
@@ -147,7 +158,7 @@ class MCPServerSse(_MCPServerWithClientSession):
         self,
         params: MCPServerSseParams,
         cache_tools_list: bool = False,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         """Create a new MCP server based on the HTTP with SSE transport.
 
@@ -164,7 +175,7 @@ class MCPServerSse(_MCPServerWithClientSession):
     def create_streams(
         self,
     ) -> AbstractAsyncContextManager[
-        Tuple[
+        tuple[
             MemoryObjectReceiveStream[JSONRPCMessage | Exception],
             MemoryObjectSendStream[JSONRPCMessage],
         ]
@@ -186,10 +197,10 @@ class MCPServerSse(_MCPServerWithClientSession):
 class MCPServerStdio(MCPServer):
     """An example (minimal) Stdio server implementation."""
 
-    def __init__(self, params: MCPServerStdioParams, cache_tools_list: bool = False, name: Optional[str] = None):
+    def __init__(self, params: MCPServerStdioParams, cache_tools_list: bool = False, name: str | None = None):
         self.params = params
         self.cache_tools_list = cache_tools_list
-        self._tools_cache: Optional[List[MCPTool]] = None
+        self._tools_cache: list[MCPTool] | None = None
         self._name = name or f"Stdio Server: {self.params.get('command', 'unknown')}"
         self.connected = False
         self.logger = logging.getLogger(__name__)
@@ -203,17 +214,19 @@ class MCPServerStdio(MCPServer):
         self.connected = True
         self.logger.info(f"Connected to MCP Stdio server: {self.name}")
 
-    async def list_tools(self) -> List[MCPTool]:
+    async def list_tools(self) -> list[MCPTool]:
         if self.cache_tools_list and self._tools_cache is not None:
             return self._tools_cache
         # For demonstration, return an empty list or similar static tools.
-        tools: List[MCPTool] = []
+        tools: list[MCPTool] = []
         if self.cache_tools_list:
             self._tools_cache = tools
         return tools
 
-    async def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return {"content": [f"Called {tool_name} with args {arguments} via Stdio"]}
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> CallToolResult:
+        # Demonstration stub: the agent only ever instantiates the SSE transport,
+        # so this path exists to satisfy the interface rather than to be called.
+        return cast(CallToolResult, {"content": [f"Called {tool_name} with args {arguments} via Stdio"]})
 
     async def cleanup(self):
         self.connected = False

@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from "react";
-import { useAccount, useWriteContract, useReadContract } from "wagmi";
-import { formatUnits } from "viem";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
+import { formatUnits, parseEventLogs } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { CONTRACT_ADDRESSES, BOOKING_ESCROW_ABI, DAYBED_TYPES } from "@/web3/contracts";
 import { Button } from "@/components/ui/button";
-import { Loader2, Droplets, CheckCircle, ExternalLink } from "lucide-react";
+import { AlertTriangle, Droplets, Loader2 } from "lucide-react";
 import { useLang } from "@/lib/i18n";
 
 const ERC20_ABI = [
@@ -20,8 +20,16 @@ const ERC20_ABI = [
   },
   {
     inputs: [
-      { name: "account", type: "address" },
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
     ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
     name: "balanceOf",
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
@@ -43,6 +51,8 @@ interface Web3BookingButtonProps {
   onSuccess?: (bookingId: number, txHash: string) => void;
 }
 
+type Step = "idle" | "fauceting" | "approving" | "booking" | "confirming";
+
 export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
   daybedType,
   dateString,
@@ -50,20 +60,33 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
   onSuccess,
 }) => {
   const { address, isConnected } = useAccount();
-  const { writeContractAsync, isPending } = useWriteContract();
+  const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
   const { tf } = useLang();
-  const [step, setStep] = useState<"idle" | "fauceting" | "approving" | "booking">("idle");
+  const [step, setStep] = useState<Step>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const autoSignHandled = useRef(false);
 
-  // Read required deposit in USDT (6 decimals)
   const { data: depositUsdt } = useReadContract({
     address: CONTRACT_ADDRESSES.bookingEscrow,
     abi: BOOKING_ESCROW_ABI,
     functionName: "calculateDeposit",
     args: address ? [address, daybedType, CONTRACT_ADDRESSES.mockUSDT] : undefined,
+    query: { enabled: !!address && daybedType >= 0 && daybedType < DAYBED_TYPES.length },
+  });
+
+  // The escrow's remaining spend permission for this wallet. A repeat booking
+  // that already has enough allowance must not force a second approval prompt:
+  // an unnecessary signature is both a UX cost and an extra chance for the
+  // guest to reject the wrong prompt.
+  const { data: usdtAllowance, refetch: refetchAllowance } = useReadContract({
+    address: CONTRACT_ADDRESSES.mockUSDT,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: address ? [address, CONTRACT_ADDRESSES.bookingEscrow] : undefined,
     query: { enabled: !!address },
   });
 
-  // Read user USDT balance
   const { data: usdtBalance, refetch: refetchBalance } = useReadContract({
     address: CONTRACT_ADDRESSES.mockUSDT,
     abi: ERC20_ABI,
@@ -73,37 +96,60 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
   });
 
   const handleFaucet = async () => {
+    if (!publicClient) return;
+    setError(null);
     setStep("fauceting");
     try {
-      await writeContractAsync({
+      const hash = await writeContractAsync({
         address: CONTRACT_ADDRESSES.mockUSDT,
         abi: ERC20_ABI,
         functionName: "faucet",
       });
-      refetchBalance();
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") throw new Error("Faucet transaction reverted");
+      await refetchBalance();
     } catch (err) {
-      console.error("Faucet claim failed:", err);
+      setError(err instanceof Error ? err.message : "Faucet claim failed");
+    } finally {
+      setStep("idle");
     }
-    setStep("idle");
   };
 
   const handleBooking = useCallback(async () => {
-    if (!depositUsdt || !dateString || !address) return;
+    if (!depositUsdt || !dateString || !address || !publicClient) return;
+    if (daybedType < 0 || daybedType >= DAYBED_TYPES.length) {
+      setError("Unsupported daybed type");
+      return;
+    }
 
-    setStep("approving");
+    const visitMs = new Date(`${dateString}T00:00:00`).getTime();
+    if (!Number.isFinite(visitMs) || visitMs <= Date.now()) {
+      setError("Visit date must be in the future");
+      return;
+    }
+
+    setError(null);
     try {
-      // Step 1: Approve USDT to BookingEscrow
-      await writeContractAsync({
-        address: CONTRACT_ADDRESSES.mockUSDT,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [CONTRACT_ADDRESSES.bookingEscrow, depositUsdt],
-      });
+      // Only ask for an approval when the existing allowance is actually short
+      // of the deposit. An unknown allowance (`undefined`, i.e. still loading or
+      // unreadable) is treated as insufficient so we never skip a required
+      // approval and submit a booking that would revert.
+      const needsApproval = usdtAllowance === undefined || usdtAllowance < depositUsdt;
+      if (needsApproval) {
+        setStep("approving");
+        const approvalHash = await writeContractAsync({
+          address: CONTRACT_ADDRESSES.mockUSDT,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [CONTRACT_ADDRESSES.bookingEscrow, depositUsdt],
+        });
+        const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        if (approvalReceipt.status !== "success") throw new Error("USDT approval reverted");
+        await refetchAllowance();
+      }
 
       setStep("booking");
-
-      // Step 2: Create booking with USDT
-      const visitTimestamp = BigInt(Math.floor(new Date(dateString).getTime() / 1000));
+      const visitTimestamp = BigInt(Math.floor(visitMs / 1000));
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESSES.bookingEscrow,
         abi: BOOKING_ESCROW_ABI,
@@ -112,22 +158,61 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
         value: 0n,
       });
 
-      if (onSuccess) {
-        onSuccess(1, hash);
-      }
-    } catch (err) {
-      console.error("Booking failed:", err);
-    }
-    setStep("idle");
-  }, [depositUsdt, dateString, address, daybedType, writeContractAsync, onSuccess]);
+      setStep("confirming");
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") throw new Error("Booking transaction reverted");
 
-  // Auto-trigger Rabby / Wallet popup when autoSign prop is true and balance is ready
-  React.useEffect(() => {
-    if (autoSign && isConnected && usdtBalance !== undefined && depositUsdt !== undefined && usdtBalance >= depositUsdt && step === "idle") {
-      console.log("[web3] Voice auto-sign triggered! Opening Rabby / Wallet signature popup...");
-      handleBooking();
+      const bookingLogs = parseEventLogs({
+        abi: BOOKING_ESCROW_ABI,
+        eventName: "BookingCreated",
+        logs: receipt.logs,
+        strict: false,
+      });
+      const bookingLog = bookingLogs.find(
+        (log) =>
+          log.address.toLowerCase() === CONTRACT_ADDRESSES.bookingEscrow.toLowerCase() &&
+          log.args.guest?.toLowerCase() === address.toLowerCase(),
+      );
+      const bookingId = bookingLog?.args.bookingId;
+      if (typeof bookingId !== "bigint" || bookingId > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("BookingCreated event was not found in the confirmed transaction");
+      }
+
+      onSuccess?.(Number(bookingId), hash);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Booking failed");
+    } finally {
+      setStep("idle");
     }
-  }, [autoSign, isConnected, usdtBalance, depositUsdt, step, handleBooking]);
+  }, [
+    address,
+    dateString,
+    daybedType,
+    depositUsdt,
+    onSuccess,
+    publicClient,
+    refetchAllowance,
+    usdtAllowance,
+    writeContractAsync,
+  ]);
+
+  useEffect(() => {
+    if (!autoSign) {
+      autoSignHandled.current = false;
+      return;
+    }
+    if (
+      !autoSignHandled.current &&
+      isConnected &&
+      usdtBalance !== undefined &&
+      depositUsdt !== undefined &&
+      usdtBalance >= depositUsdt &&
+      step === "idle"
+    ) {
+      autoSignHandled.current = true;
+      void handleBooking();
+    }
+  }, [autoSign, depositUsdt, handleBooking, isConnected, step, usdtBalance]);
 
   if (!isConnected) {
     return (
@@ -144,67 +229,66 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
     );
   }
 
-  const daybedName = DAYBED_TYPES[daybedType]?.name || "Daybed";
-  const depositFormatted = depositUsdt ? formatUnits(depositUsdt, 6) : "...";
-  const balanceFormatted = usdtBalance ? formatUnits(usdtBalance, 6) : "0";
-  const hasEnoughBalance = usdtBalance !== undefined && depositUsdt !== undefined && usdtBalance >= depositUsdt;
+  const daybedName = DAYBED_TYPES[daybedType]?.name || "Unsupported Daybed";
+  const depositFormatted = depositUsdt !== undefined ? formatUnits(depositUsdt, 6) : "...";
+  const balanceFormatted = usdtBalance !== undefined ? formatUnits(usdtBalance, 6) : "0";
+  const hasEnoughBalance =
+    usdtBalance !== undefined && depositUsdt !== undefined && usdtBalance >= depositUsdt;
+  const busy = step !== "idle";
 
   return (
     <div className="flex flex-col gap-3 w-full">
-      {/* Deposit info */}
       <div className="flex items-center justify-between text-xs p-3 rounded-xl bg-slate-950/80 border border-white/10">
-        <span className="text-slate-400">
-          Escrow Deposit ({daybedName})
-        </span>
+        <span className="text-slate-400">Escrow Deposit ({daybedName})</span>
         <span className="text-amber-300 font-bold font-mono">{depositFormatted} USDT</span>
       </div>
 
-      {/* Balance info & Direct Faucet Claim Button */}
       <div className="flex items-center justify-between text-xs px-1">
-        <span className="text-slate-400">Your USDT Balance</span>
+        <span className="text-slate-400">Your Mock USDT Balance</span>
         <span className={hasEnoughBalance ? "text-amber-300 font-bold font-mono" : "text-rose-400 font-bold font-mono"}>
           {balanceFormatted} USDT
         </span>
       </div>
 
-      {/* Claim Free Faucet Button if low balance */}
       {!hasEnoughBalance && (
         <Button
           variant="outline"
           size="sm"
-          disabled={step === "fauceting"}
+          disabled={busy}
           onClick={handleFaucet}
           className="w-full rounded-xl border-amber-400/40 text-amber-300 hover:bg-amber-400/10 text-xs font-semibold py-2 flex items-center justify-center gap-2"
         >
-          {step === "fauceting" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Droplets className="h-3.5 w-3.5 text-amber-300" />
-          )}
-          Claim 1,000 Free Mock USDT (Faucet)
+          {step === "fauceting" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Droplets className="h-3.5 w-3.5" />}
+          Claim 1,000 Free Mock USDT (Testnet Faucet)
         </Button>
       )}
 
-      {/* Book button */}
       <Button
         variant="luxury"
         size="lg"
-        disabled={isPending || !depositUsdt || !hasEnoughBalance}
-        onClick={handleBooking}
+        disabled={busy || !depositUsdt || !hasEnoughBalance || !DAYBED_TYPES[daybedType]}
+        onClick={() => void handleBooking()}
         className="w-full rounded-full py-3.5 gold-gradient text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-all"
       >
-        {isPending ? (
+        {busy ? (
           <span className="flex items-center justify-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-slate-950" />
-            {step === "approving"
-              ? "Approving USDT..."
-              : "Booking on Monad..."
-            }
+            {step === "approving" && "Approving USDT..."}
+            {step === "booking" && "Submitting booking..."}
+            {step === "confirming" && "Confirming on-chain..."}
+            {step === "fauceting" && "Claiming faucet..."}
           </span>
         ) : (
           `PAY ${depositFormatted} USDT DEPOSIT`
         )}
       </Button>
+
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-400/10 p-3 text-xs text-rose-300">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
     </div>
   );
 };

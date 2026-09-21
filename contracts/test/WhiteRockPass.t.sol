@@ -359,7 +359,28 @@ contract WhiteRockPassTest is Test {
         vm.stopPrank();
 
         string memory uri = pass.tokenURI(1);
-        assertEq(uri, "https://api.whiterockbali.com/metadata/1.json");
+        assertEq(uri, "https://api.whiterockbali.com/metadata/0x0000000000000000000000000000000000000000000000000000000000000001.json");
+    }
+
+    function test_tokenURI_staysDistinctAcrossBaseURIChanges() public {
+        // Regression test for the encodePacked collision: a variable-length
+        // decimal suffix made token 23 under ".../1" and token 3 under ".../12"
+        // produce the same URI. The fixed-width suffix keeps them apart.
+        vm.startPrank(alice);
+        for (uint256 i = 0; i < 24; i++) {
+            usdt.approve(address(pass), 10 * 10**6);
+            pass.mintPass(WhiteRockPass.PassTier.LAGOON);
+        }
+        vm.stopPrank();
+
+        string memory before = pass.tokenURI(23);
+
+        vm.prank(owner);
+        pass.setBaseURI("https://api.whiterockbali.com/metadata/1");
+
+        assertEq(pass.tokenURI(3), "https://api.whiterockbali.com/metadata/10x0000000000000000000000000000000000000000000000000000000000000003.json");
+        assertEq(before, "https://api.whiterockbali.com/metadata/0x0000000000000000000000000000000000000000000000000000000000000017.json");
+        assertTrue(keccak256(bytes(pass.tokenURI(3))) != keccak256(bytes(pass.tokenURI(23))));
     }
 
     function test_tokenURI_revert_nonExistent() public {
@@ -427,7 +448,59 @@ contract WhiteRockPassTest is Test {
     }
 
     function testFuzz_getDiscountBps_neverExceedsMax(address user) public view {
+        // ERC721.balanceOf(address(0)) reverts by design, so the zero address
+        // is outside this view's domain rather than a case it must return 0 for.
+        vm.assume(user != address(0));
         uint16 discount = pass.getDiscountBpsForUser(user);
         assertLe(discount, 10000);
+    }
+
+    // ============================================================
+    // setUsdtToken / withdrawToken
+    // ============================================================
+
+    /// Repointing the payment token must not strand whatever balance of the
+    /// previous token the contract is still holding.
+    function test_withdrawToken_recoversSupersededTokenBalance() public {
+        usdt.mint(address(pass), 500 * 10**6);
+
+        MockUSDT usdtV2 = new MockUSDT(owner);
+        pass.setUsdtToken(address(usdtV2));
+
+        // withdrawUSDT() now reads the new token and would leave the old
+        // balance stuck forever.
+        assertEq(usdt.balanceOf(address(pass)), 500 * 10**6);
+
+        uint256 ownerBefore = usdt.balanceOf(owner);
+        pass.withdrawToken(address(usdt));
+        assertEq(usdt.balanceOf(address(pass)), 0);
+        assertEq(usdt.balanceOf(owner), ownerBefore + 500 * 10**6);
+    }
+
+    function test_withdrawToken_recoversTokenSentByMistake() public {
+        MockUSDT stray = new MockUSDT(owner);
+        stray.mint(address(pass), 42 * 10**6);
+
+        uint256 ownerBefore = stray.balanceOf(owner);
+        pass.withdrawToken(address(stray));
+        assertEq(stray.balanceOf(address(pass)), 0);
+        assertEq(stray.balanceOf(owner), ownerBefore + 42 * 10**6);
+    }
+
+    function test_withdrawToken_revertsForZeroAddress() public {
+        vm.expectRevert("Invalid token address");
+        pass.withdrawToken(address(0));
+    }
+
+    function test_withdrawToken_revertsWhenBalanceIsZero() public {
+        vm.expectRevert("No token balance to withdraw");
+        pass.withdrawToken(address(usdt));
+    }
+
+    function test_withdrawToken_revertsForNonOwner() public {
+        usdt.mint(address(pass), 100 * 10**6);
+        vm.prank(alice);
+        vm.expectRevert();
+        pass.withdrawToken(address(usdt));
     }
 }

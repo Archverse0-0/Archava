@@ -1,0 +1,115 @@
+{
+  "$comment": [
+    "Per-advisory, time-boxed exemptions for `npm audit`, consumed by",
+    "scripts/dependency-audit-gate.mjs. This is NOT a blanket ignore: the",
+    "gate fails on any high/critical advisory that is absent from this file,",
+    "and on any entry whose expiresOn date has passed. Removing an entry",
+    "therefore makes CI stricter, never looser.",
+    "",
+    "Each entry records the advisory URL, the concrete reason the finding is",
+    "accepted today, and the date after which it must be re-triaged. See",
+    "DEPENDENCY_REMEDIATION.md for the migration plan behind each one."
+  ],
+  "gate": {
+    "blockOn": ["high", "critical"],
+    "reportOnly": ["low", "moderate"]
+  },
+  "exceptions": [
+    {
+      "advisory": "https://github.com/advisories/GHSA-5xrq-8626-4rwp",
+      "severity": "critical",
+      "packages": ["vitest"],
+      "reason": "Vitest UI server arbitrary file read. Vitest only runs under `npm run test`/`test:watch`; the `test:ui` script that would start the UI server was removed on this branch, `@vitest/ui` is an optional peer and is not installed, and the UI server is never started by CI or by the production build. Nothing from Vitest ships in dist/.",
+      "remediation": "Upgrade vitest 2.x -> 5.x (semver major).",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+      "severity": "moderate",
+      "packages": ["vitest", "@vitest/mocker", "vite-node"],
+      "reason": "Vitest mock-module path traversal. Dev-only test runtime; requires a crafted mock module path that only a contributor with repo write access could introduce.",
+      "remediation": "Same vitest 2.x -> 5.x major upgrade as GHSA-5xrq-8626-4rwp.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+      "severity": "high",
+      "packages": ["vite"],
+      "reason": "vite server.fs.deny bypass on Windows alternate paths (\\??\\ and 8.3 short names). The Vite dev server is not deployed; production serves the static dist/ tree through nginx with no Vite server process. Fix requires vite 5.x -> 6.x, a major bump.",
+      "remediation": "Upgrade vite 5.x -> 6.x (semver major) and re-run `npm run build`.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+      "severity": "moderate",
+      "packages": ["vite"],
+      "reason": "Path traversal in optimized-dependency .map handling. Same dev-server-only reachability as GHSA-fx2h-pf6j-xcff; the optimized-deps cache exists only while `vite dev` is running.",
+      "remediation": "Resolved by the vite 5.x -> 6.x major upgrade.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+      "severity": "moderate",
+      "packages": ["vite", "launch-editor"],
+      "reason": "launch-editor NTLMv2 hash disclosure via UNC path. Requires a remote page to reach the dev server's /__open-in-editor endpoint, which only exists on a contributor's localhost and is never exposed.",
+      "remediation": "Resolved by the vite 5.x -> 6.x major upgrade.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+      "severity": "moderate",
+      "packages": ["esbuild"],
+      "reason": "esbuild dev-server request forgery. esbuild is a build-time transform dependency; the dev server it protects against is not deployed. Bundled into the app is only esbuild's transform output, never its server.",
+      "remediation": "Resolved by the vite 5.x -> 6.x major upgrade, which pulls esbuild >= 0.25.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+      "severity": "moderate",
+      "packages": ["react-router", "react-router-dom"],
+      "reason": "React Router constructor injection via deserializeErrors() during SSR hydration. Archava is a client-only SPA built with Vite: there is no server render pass, so deserializeErrors() is never called. Requires react-router 6.x -> 7.x, a major bump.",
+      "remediation": "Upgrade react-router-dom 6.x -> 7.x (semver major). React Router 7 is backwards compatible for the declarative <BrowserRouter>/<Routes> API this app uses.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+      "severity": "moderate",
+      "packages": ["react-router", "react-router-dom"],
+      "reason": "React Router open redirect via backslash-prefixed target in <Link>/useNavigate. In a client-only SPA a backslash target stays an in-app route; there is no cross-origin navigation. The one path that forwards an externally supplied location is the AI avatar's navigate packet, which is constrained by the ROUTE_ALIASES allowlist in src/components/ai_avatar/AvatarVoiceAgent.jsx.",
+      "remediation": "Resolved by the react-router-dom 6.x -> 7.x major upgrade; additionally keep the ROUTE_ALIASES allowlist in the avatar data handler.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-vcc3-ghjq-m6fr",
+      "severity": "moderate",
+      "packages": ["decode-uri-component", "query-string", "wagmi"],
+      "reason": "decode-uri-component DoS via exponential decoding of malformed percent-encoded input. Transitive through wagmi/query-string; only reachable from a URL the visitor's own browser decodes, so the impact is confined to that visitor's tab.",
+      "remediation": "Resolved by the wagmi 2.x -> 3.x major upgrade.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+      "severity": "moderate",
+      "packages": ["uuid", "wagmi", "@gemini-wallet/core"],
+      "reason": "uuid buffer bounds check in v3/v5/v6 when an explicit buf is supplied. The app calls uuidv4()/randomUUID() without a caller-provided buffer, so the unchecked branch is unreachable from application code.",
+      "remediation": "Resolved by the wagmi 2.x -> 3.x major upgrade.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-96hv-2xvq-fx4p",
+      "severity": "high",
+      "packages": ["ws", "wagmi", "@walletconnect/universal-provider"],
+      "reason": "ws memory-exhaustion DoS from tiny fragments and data chunks. Reached only through the WalletConnect relay socket, i.e. the browser must be paired with a wallet that is itself talking to a malicious relay. Fixed in ws 8.21.0; the pinned version comes from wagmi 2.x and cannot be overridden without a major bump of wagmi.",
+      "remediation": "Upgrade wagmi 2.x -> 3.x (semver major), which depends on ws >= 8.21.0.",
+      "expiresOn": "2027-03-31"
+    },
+    {
+      "advisory": "https://github.com/advisories/GHSA-58qx-3vcg-4xpx",
+      "severity": "moderate",
+      "packages": ["ws", "wagmi", "@walletconnect/universal-provider"],
+      "reason": "ws uninitialized memory disclosure. Same WalletConnect-relay reachability as GHSA-96hv-2xvq-fx4p and the same wagmi 2.x version pin.",
+      "remediation": "Resolved by the wagmi 2.x -> 3.x major upgrade.",
+      "expiresOn": "2027-03-31"
+    }
+  ]
+}

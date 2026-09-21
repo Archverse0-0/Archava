@@ -13,16 +13,11 @@ contract DeployScript is Script {
 
         // 1. Deploy MockUSDT
         MockUSDT mockUSDT = new MockUSDT(msg.sender);
-        console.log("MockUSDT deployed at:", address(mockUSDT));
 
         // 2. Deploy WhiteRockPass
         string memory baseURI = "https://api.whiterockbali.com/metadata/";
         WhiteRockPass whiteRockPass = new WhiteRockPass(baseURI, msg.sender);
-        console.log("WhiteRockPass deployed at:", address(whiteRockPass));
-
-        // Set USDT token on WhiteRockPass
         whiteRockPass.setUsdtToken(address(mockUSDT));
-        console.log("WhiteRockPass USDT token set");
 
         // 3. Deploy BookingEscrow
         BookingEscrow bookingEscrow = new BookingEscrow(
@@ -30,18 +25,10 @@ contract DeployScript is Script {
             address(mockUSDT),
             msg.sender
         );
-        console.log("BookingEscrow deployed at:", address(bookingEscrow));
 
         // Mint initial USDT to deployer for testing
         mockUSDT.mint(msg.sender, 1_000_000 * 10**6);
-        console.log("Minted 1M USDT to deployer");
 
         vm.stopBroadcast();
-
-        // Summary
-        console.log("=== DEPLOYMENT SUMMARY ===");
-        console.log("MockUSDT: ", address(mockUSDT));
-        console.log("WhiteRockPass: ", address(whiteRockPass));
-        console.log("BookingEscrow: ", address(bookingEscrow));
     }
 }
