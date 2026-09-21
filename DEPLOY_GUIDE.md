@@ -1,109 +1,75 @@
-# Deploy Archava (White Rock Bali) ke Vercel
+# Archava Deployment Guide
 
-Tutorial lengkap dari repo sampai live, termasuk setup AI Voice Concierge "Ava".
+Archava is a multi-service application. Deploying only the Vite frontend is not enough for Ava voice sessions.
 
----
+## Required production pieces
 
-## 1. Yang sudah dilakukan (status sekarang)
+1. Vite frontend
+2. Flask `/api/getToken` service
+3. LiveKit Ava worker
+4. LiveKit Cloud project
+5. Optional Tavus avatar
+6. Monad Testnet contracts
 
-- ✅ Repo **private** `Archverse0-0/Archava` sudah dibuat
-- ✅ Source `website/` (React + Vite) sudah di-push ke branch `main` (139 file)
-- ✅ `.env` **tidak** ikut ter-push (aman)
-- ✅ `node_modules` (420MB) + `dist` sudah di-ignore
+## Frontend on Vercel
 
-Repo: `https://github.com/Archverse0-0/Archava`
+Configure:
 
----
+- Framework: Vite
+- Build: `npm run build`
+- Output: `dist`
+- Node: 22.22.2 or a compatible newer runtime
+- `VITE_LIVEKIT_URL`: your LiveKit WSS URL
 
-## 2. Deploy di Vercel (via Dashboard — paling gampang)
+The frontend expects `/api/getToken` on the same origin. If the Flask token service is hosted elsewhere, configure a same-origin reverse proxy/rewrite from `/api/*` to that service. Do not expose LiveKit API secrets in Vercel frontend variables.
 
-1. Buka **https://vercel.com** → login pakai GitHub (akun `haikarure`).
-2. Klik **Add New → Project**.
-3. Di tab **Import Git Repository**, cari `Archverse0-0 / Archava` → klik **Import**.
-   - Kalau gak kelihatan: klik **Configure GitHub App** → authorize org `Archverse0-0` dulu.
-4. **Project Settings** (Vercel auto-detect Vite, tapi cek):
-   - **Framework Preset**: `Vite`
-   - **Root Directory**: `/` (biarkan default — repo isinya website langsung)
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-   - **Install Command**: `npm install` (biarkan auto)
-5. **Environment Variables** (PENTING — tanpa ini AI voice gak jalan):
-   - Klik **Environment Variables** dan tambahin:
-     | Name | Value | Environments |
-     |---|---|---|
-     | `VITE_LIVEKIT_URL` | `wss://receptionist-lwypqvqa.livekit.cloud` | Production, Preview, Development |
-   - (Nilai ini diambil dari `.env` lokal yang sengaja gak di-push. Kalau URL LiveKit lu berubah, update di sini.)
-6. Klik **Deploy**.
-7. Tunggu ~1–2 menit. Status jadi **Ready** → klik URL `*.vercel.app` untuk cek.
+## Token service
 
-> **Catatan:** Vercel default pakai **npm** (bukan bun). `package-lock.json` sudah ada di repo, jadi install aman. Jangan pindah ke bun kecuali sengaja.
+Environment:
 
----
+```ini
+LIVEKIT_API_KEY=...
+LIVEKIT_API_SECRET=...
+ALLOWED_ORIGINS=https://your-frontend.example
+TOKEN_RATE_LIMIT_PER_MINUTE=30
+```
 
-## 3. Cek hasil deploy
+The token service generates room names and participant identities server-side.
 
-Buka URL Vercel, pastiin:
+## Ava worker
 
-- [ ] Hero video muter mulus (background `bg-2m.webm` / `bg-2m.mp4`)
-- [ ] Navbar gak ada "kotak putih" pas scroll up/down
-- [ ] Switcher bahasa (EN → hover → ID/RU/KO) jalan; currency ngikut otomatis (USD / RUB / KRW / IDR)
-- [ ] Semua 16 route kebuka: `/`, `/daybeds-suites`, `/dining`, `/experiences`, `/spa-wellness`, `/fitness-center`, `/weddings-mice`, `/events`, `/merch`, `/live-weather`, `/contact`, `/nye`, `/faq`, `/careers`, `/booking`, `/valet-parking`
-- [ ] **AI Voice "Ava"** (tombol pojok kanan bawah) bisa dibuka & connect ke LiveKit
-
----
-
-## 4. Custom Domain (opsional)
-
-1. Di dashboard Vercel → project → **Settings → Domains**.
-2. Add domain (misal `archava.id` / `whiterock.example.com`).
-3. Ikuti instruksi DNS (tambah CNAME / A record di registrar domain lu).
-4. SSL otomatis dari Vercel (Let's Encrypt).
-
----
-
-## 5. Update / Re-deploy
-
-Setiap lu push ke `main` di GitHub, Vercel **auto re-deploy**.
+Run:
 
 ```bash
-# dari folder website lokal lu (parent repo ai-avatar-yt gak diutak):
-cd /home/haikaru/Archverse/Lab/ai-avatar-yt/website
-
-# cara push update (pakai temp repo seperti saat init):
-# 1. copy website/ ke temp, 2. git init, 3. add remote, 4. commit, 5. push
+cd backend
+python agent.py start
 ```
 
-Atau kalau lu mau workflow lebih standar ke depan: **pisahin `website/` jadi git repo sendiri** (bukan temp), biar `git push` langsung dari sana tanpa copy manual.
+Use the deployment mode recommended by your LiveKit Agents runtime. `agent.py dev` is for development.
 
----
+## Docker deployment
 
-## 6. Troubleshooting
-
-| Gejala | Penyebab | Solusi |
-|---|---|---|
-| Build gagal / `module not found` | npm gak baca lockfile | Pastiin `package-lock.json` ter-commit (sudah ada) |
-| AI voice gak connect | `VITE_LIVEKIT_URL` kosong di Vercel | Tambah Env Var (lihat step 2.5) |
-| Video gak muncul | path asset salah | Cek `public/assets/whiterock/bg-2m.*` ter-commit (sudah) |
-| Bahasa/currency gak berubah | i18n context | Pastiin `<LangProvider>` wrap `<App>` (sudah di App.tsx) |
-| Deploy build tapi blank page | SPA route 404 | Vercel handle SPA otomatis untuk Vite; kalau manual, add `vercel.json` rewrite ke `index.html` |
-
----
-
-## 7. Architektur singkat
-
-```
-Archava/
-├── index.html
-├── vite.config.ts          # Vite + React SWC, @ alias → src/
-├── src/
-│   ├── App.tsx             # Router + LangProvider + FloatingConcierge
-│   ├── lib/i18n.tsx        # 4 bahasa (ID/EN/RU/KO) + auto-currency
-│   ├── components/
-│   │   ├── layout/        # Navbar, Footer, PageHero, BgVideo
-│   │   └── ai_avatar/     # LiveKitWidget + AvatarVoiceAgent ("Ava")
-│   ├── pages/             # 16 halaman
-│   └── data/whiterock.ts  # konten + harga (i18n)
-└── public/assets/whiterock/  # logo, video, foto
+```bash
+docker compose up --build
 ```
 
-**Catatan keamanan:** Backend LiveKit (Python) **tidak** di-deploy Vercel — butuh server terpisah. Frontend cuma butuh `VITE_LIVEKIT_URL` (URL publik, bukan secret) buat connect ke LiveKit cloud.
+The frontend container listens on port 80. Terminate TLS at a reverse proxy/load balancer unless nginx is separately configured with certificates.
+
+## Smart contracts
+
+Contract deployment is manual via GitHub `workflow_dispatch` or Foundry CLI. After a deployment, update frontend addresses and verify the full booking flow before publishing the new frontend.
+
+## Pre-release checklist
+
+- frontend lint/typecheck passes
+- frontend tests pass
+- backend tests pass
+- Forge build/tests pass
+- Slither passes or findings are reviewed
+- JS and Python dependency audits are reviewed
+- `/api/getToken` rejects abusive volume and disallowed browser origins
+- Web3 confirmation verifies the real transaction event
+- staff wallet is the actual BookingEscrow owner
+- current contract addresses match the frontend
+- Ava cannot trigger signing without a pending booking
+- availability is backed by a real inventory provider before Ava promises a slot
