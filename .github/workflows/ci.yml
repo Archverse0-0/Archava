@@ -55,12 +55,15 @@ jobs:
       # step used to fail on every run and was hidden behind
       # `fail_ci_if_error: false` — a permanently red job step masquerading as
       # green. The step is skipped entirely when no token exists, so the job is
-      # honest either way.
+      # honest either way. The token reaches the step through `env` because the
+      # `secrets` context is not available inside a step's `if` condition.
       - uses: codecov/codecov-action@v5
-        if: always() && secrets.CODECOV_TOKEN != ''
+        if: always() && env.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: ./coverage/lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
 
   frontend-build:
     name: Frontend - Build
@@ -160,10 +163,12 @@ jobs:
       - run: forge coverage --report lcov
       # Same reasoning as the frontend upload: skip rather than hide.
       - uses: codecov/codecov-action@v5
-        if: always() && secrets.CODECOV_TOKEN != ''
+        if: always() && env.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: ./contracts/lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ env.CODECOV_TOKEN }}
 
   contracts-slither:
     name: Smart Contracts - Slither
