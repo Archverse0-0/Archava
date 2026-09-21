@@ -19,6 +19,16 @@ const ERC20_ABI = [
     type: "function",
   },
   {
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    name: "allowance",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ name: "account", type: "address" }],
     name: "balanceOf",
     outputs: [{ name: "", type: "uint256" }],
@@ -65,6 +75,18 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
     query: { enabled: !!address && daybedType >= 0 && daybedType < DAYBED_TYPES.length },
   });
 
+  // The escrow's remaining spend permission for this wallet. A repeat booking
+  // that already has enough allowance must not force a second approval prompt:
+  // an unnecessary signature is both a UX cost and an extra chance for the
+  // guest to reject the wrong prompt.
+  const { data: usdtAllowance, refetch: refetchAllowance } = useReadContract({
+    address: CONTRACT_ADDRESSES.mockUSDT,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: address ? [address, CONTRACT_ADDRESSES.bookingEscrow] : undefined,
+    query: { enabled: !!address },
+  });
+
   const { data: usdtBalance, refetch: refetchBalance } = useReadContract({
     address: CONTRACT_ADDRESSES.mockUSDT,
     abi: ERC20_ABI,
@@ -108,15 +130,23 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
 
     setError(null);
     try {
-      setStep("approving");
-      const approvalHash = await writeContractAsync({
-        address: CONTRACT_ADDRESSES.mockUSDT,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [CONTRACT_ADDRESSES.bookingEscrow, depositUsdt],
-      });
-      const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
-      if (approvalReceipt.status !== "success") throw new Error("USDT approval reverted");
+      // Only ask for an approval when the existing allowance is actually short
+      // of the deposit. An unknown allowance (`undefined`, i.e. still loading or
+      // unreadable) is treated as insufficient so we never skip a required
+      // approval and submit a booking that would revert.
+      const needsApproval = usdtAllowance === undefined || usdtAllowance < depositUsdt;
+      if (needsApproval) {
+        setStep("approving");
+        const approvalHash = await writeContractAsync({
+          address: CONTRACT_ADDRESSES.mockUSDT,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [CONTRACT_ADDRESSES.bookingEscrow, depositUsdt],
+        });
+        const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+        if (approvalReceipt.status !== "success") throw new Error("USDT approval reverted");
+        await refetchAllowance();
+      }
 
       setStep("booking");
       const visitTimestamp = BigInt(Math.floor(visitMs / 1000));
@@ -154,7 +184,7 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
     } finally {
       setStep("idle");
     }
-  }, [address, dateString, daybedType, depositUsdt, onSuccess, publicClient, writeContractAsync]);
+  }, [address, dateString, daybedType, depositUsdt, onSuccess, publicClient, usdtAllowance, writeContractAsync]);
 
   useEffect(() => {
     if (!autoSign) {

@@ -2,7 +2,6 @@ import { useEffect, useState, Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { LangProvider } from "@/lib/i18n";
 import { useLang } from "@/lib/i18n";
@@ -49,8 +48,6 @@ const PageLoader = () => (
     </div>
   </div>
 );
-
-const queryClient = new QueryClient();
 
 const FloatingConcierge = ({ onOpen }: { onOpen: () => void }) => {
   const { tf } = useLang();
@@ -111,7 +108,7 @@ const GlobalLayout = () => {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/daybeds-suites" element={<Index />} />
+            <Route path="/daybeds-suites" element={<DaybedsSuites />} />
             <Route path="/dining" element={<Dining />} />
             <Route path="/menu" element={<Dining />} />
             <Route path="/experiences" element={<Experiences />} />
@@ -157,18 +154,21 @@ const GlobalLayout = () => {
   );
 };
 
+// NOTE: there is deliberately no QueryClientProvider here. `main.tsx` already
+// creates the QueryClient and wraps <App /> in one, so a second provider in
+// this file would create a second, isolated cache: two components asking for
+// the same query would each get their own copy, and a mutation invalidating
+// one cache would not refetch the other. Providers belong at the entry point.
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <LangProvider>
-          <GlobalLayout />
-        </LangProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <TooltipProvider>
+    <Toaster />
+    <Sonner />
+    <BrowserRouter>
+      <LangProvider>
+        <GlobalLayout />
+      </LangProvider>
+    </BrowserRouter>
+  </TooltipProvider>
 );
 
 export default App;

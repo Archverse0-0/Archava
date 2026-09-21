@@ -36,6 +36,15 @@ type BookingTuple = readonly [
 
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 
+/** The `BookingCreated` fields that must agree with the stored booking record. */
+type BookingEvent = {
+  guest: `0x${string}`;
+  daybedType: number;
+  visitTimestamp: bigint;
+  depositAmount: bigint;
+  paymentToken: `0x${string}`;
+};
+
 export default function BookingConfirmation() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -57,6 +66,7 @@ export default function BookingConfirmation() {
   const chainBooking = data as BookingTuple | undefined;
 
   const [txVerified, setTxVerified] = useState<boolean | null>(isWeb3 ? null : false);
+  const [eventFields, setEventFields] = useState<BookingEvent | null>(null);
 
   useEffect(() => {
     if (!isWeb3) return;
@@ -75,14 +85,30 @@ export default function BookingConfirmation() {
           logs: receipt.logs,
           strict: false,
         });
-        const matched = logs.some(
+        const matched = logs.find(
           (log) =>
             log.address.toLowerCase() === CONTRACT_ADDRESSES.bookingEscrow.toLowerCase() &&
             log.args.bookingId === bookingId,
         );
-        if (active) setTxVerified(receipt.status === "success" && matched);
+        if (active) {
+          setEventFields(
+            matched
+              ? {
+                  guest: matched.args.guest as `0x${string}`,
+                  daybedType: Number(matched.args.daybedType),
+                  visitTimestamp: BigInt(matched.args.visitTimestamp as bigint),
+                  depositAmount: BigInt(matched.args.depositAmount as bigint),
+                  paymentToken: matched.args.paymentToken as `0x${string}`,
+                }
+              : null,
+          );
+          setTxVerified(receipt.status === "success" && Boolean(matched));
+        }
       } catch {
-        if (active) setTxVerified(false);
+        if (active) {
+          setEventFields(null);
+          setTxVerified(false);
+        }
       }
     })();
 
@@ -91,9 +117,23 @@ export default function BookingConfirmation() {
     };
   }, [bookingId, isWeb3, publicClient, txHash, validTxHash]);
 
-  const onChainRecordMatches = Boolean(
-    bookingId !== null && chainBooking && chainBooking[0] === bookingId && chainBooking[1] !== zeroAddress,
-  );
+  // A matching bookingId in a receipt only proves *some* booking was created.
+  // The stored `bookings(id)` record is the authoritative state, so every field
+  // the event carries must also match it before the page calls the booking
+  // verified — otherwise a receipt from a different booking (or a token swap
+  // after deploy) would render as a confirmed reservation.
+  const onChainRecordMatches = useMemo(() => {
+    if (bookingId === null || !chainBooking || chainBooking[0] !== bookingId) return false;
+    if (chainBooking[1] === zeroAddress) return false;
+    if (!eventFields) return false;
+    return (
+      chainBooking[1].toLowerCase() === eventFields.guest.toLowerCase() &&
+      Number(chainBooking[2]) === eventFields.daybedType &&
+      BigInt(chainBooking[3]) === eventFields.visitTimestamp &&
+      BigInt(chainBooking[4]) === eventFields.depositAmount &&
+      chainBooking[5].toLowerCase() === eventFields.paymentToken.toLowerCase()
+    );
+  }, [bookingId, chainBooking, eventFields]);
   const verified = isWeb3 && txVerified === true && onChainRecordMatches && !bookingReadError;
   const verifying = isWeb3 && (txVerified === null || bookingLoading);
 
