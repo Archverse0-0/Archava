@@ -2,7 +2,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from tools import (
     check_room_availability,
     close_session,

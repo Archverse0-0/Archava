@@ -1,18 +1,46 @@
-import asyncio
-import logging
-import json
 import inspect
+import json
+import logging
+import os
 import typing
-from typing import Any, List, Dict, Callable, Optional, Awaitable, Sequence, Tuple, Type, Union, cast
-from uuid import uuid4
+from collections.abc import Callable
+from typing import Any
 
-# Import from the MCP module
-from .util import MCPUtil, FunctionTool
-from .server import MCPServer, MCPServerSse
-from livekit.agents import ChatContext, AgentSession, JobContext, FunctionTool as Tool
-from mcp import CallToolRequest
+# ``agent.py`` puts the backend package root on sys.path before importing this
+# module, so the shared degradation helper resolves as a top-level module.
+from degradation import degraded
+
+from .server import MCPServer
+from .util import FunctionTool, MCPUtil
 
 logger = logging.getLogger("mcp-agent-tools")
+
+
+def allowed_mcp_tools() -> frozenset[str]:
+    """Return the set of MCP tool names the agent is permitted to call.
+
+    An MCP server is a remote tool catalogue: whatever it lists, the model can
+    invoke. An n8n instance in particular can expose payment actions, database
+    writes, outbound email and destructive operations, and nothing in the tool
+    schema tells the agent which of those a deployment intends to expose. So the
+    catalogue is filtered against an explicit opt-in allowlist rather than
+    registered wholesale.
+
+    The allowlist is the *only* way a remote tool becomes callable. When
+    ``N8N_MCP_ALLOWED_TOOLS`` is unset or empty nothing is registered — the
+    failure mode is a concierge that cannot reach n8n, which is visible and
+    correctable, rather than an agent that can move money on someone's behalf.
+    """
+    raw = os.environ.get("N8N_MCP_ALLOWED_TOOLS", "")
+    names = {name.strip() for name in raw.split(",") if name.strip()}
+    if not names:
+        logger.error(
+            "N8N_MCP_ALLOWED_TOOLS is not set: no MCP tools will be registered. "
+            "Set it to a comma-separated list of tool names this deployment is "
+            "authorised to expose."
+        )
+    return frozenset(names)
+
 
 class MCPToolsIntegration:
     """
@@ -21,9 +49,9 @@ class MCPToolsIntegration:
     """
 
     @staticmethod
-    async def prepare_dynamic_tools(mcp_servers: List[MCPServer],
+    async def prepare_dynamic_tools(mcp_servers: list[MCPServer],
                                    convert_schemas_to_strict: bool = True,
-                                   auto_connect: bool = True) -> List[Callable]:
+                                   auto_connect: bool = True) -> list[Callable]:
         """
         Fetches tools from multiple MCP servers and prepares them for use with LiveKit agents.
 
@@ -36,37 +64,43 @@ class MCPToolsIntegration:
             List of decorated tool functions ready to be added to a LiveKit agent
         """
         prepared_tools = []
+        allowlist = allowed_mcp_tools()
 
         # Ensure all servers are connected if auto_connect is True
         if auto_connect:
             for server in mcp_servers:
                 if not getattr(server, 'connected', False):
-                    try:
+                    with degraded(f"MCP server {server.name}", "connect"):
                         logger.debug(f"Auto-connecting to MCP server: {server.name}")
                         await server.connect()
-                    except Exception as e:
-                        logger.error(f"Failed to connect to MCP server {server.name}: {e}")
 
         # Process each server
         for server in mcp_servers:
             logger.info(f"Fetching tools from MCP server: {server.name}")
-            try:
+            mcp_tools: list[FunctionTool] | None = None
+            with degraded(f"MCP server {server.name}", "list tools"):
                 mcp_tools = await MCPUtil.get_function_tools(
                     server, convert_schemas_to_strict=convert_schemas_to_strict
                 )
                 logger.info(f"Received {len(mcp_tools)} tools from {server.name}")
-            except Exception as e:
-                logger.error(f"Failed to fetch tools from {server.name}: {e}")
+            if mcp_tools is None:
                 continue
 
+            # Only tools named in N8N_MCP_ALLOWED_TOOLS are exposed to the model.
+            permitted = [t for t in mcp_tools if t.name in allowlist]
+            withheld = sorted(t.name for t in mcp_tools if t.name not in allowlist)
+            if withheld:
+                logger.warning(
+                    "Withholding %d unauthorised MCP tool(s) from %s: %s",
+                    len(withheld), server.name, ", ".join(withheld),
+                )
+
             # Process each tool from this server
-            for tool_instance in mcp_tools:
-                try:
+            for tool_instance in permitted:
+                with degraded(f"tool {tool_instance.name}", "prepare"):
                     decorated_tool = MCPToolsIntegration._create_decorated_tool(tool_instance)
                     prepared_tools.append(decorated_tool)
                     logger.debug(f"Successfully prepared tool: {tool_instance.name}")
-                except Exception as e:
-                    logger.error(f"Failed to prepare tool '{tool_instance.name}': {e}")
 
         return prepared_tools
 
@@ -113,13 +147,31 @@ class MCPToolsIntegration:
         # Define the actual function that will be called by the agent
         async def tool_impl(**kwargs):
             input_json = json.dumps(kwargs)
-            logger.info(f"Invoking tool '{tool.name}' with args: {kwargs}")
+            # Tool arguments are model-generated and tool results are
+            # server-generated, so both are untrusted data that routinely carries
+            # personal information: a guest's name, email address, phone number,
+            # booking reference, or an n8n credential echoed back in an error.
+            # Logging them verbatim would copy that data into stdout, into the
+            # platform log sink and into every downstream log shipper. The names
+            # and types of the arguments are what debugging a tool call needs;
+            # the values are not.
+            logger.info(
+                "Invoking MCP tool '%s' with argument names: %s",
+                tool.name,
+                sorted(kwargs),
+            )
             result_str = await tool.on_invoke_tool(None, input_json)
-            logger.info(f"Tool '{tool.name}' result: {result_str}")
+            logger.info(
+                "MCP tool '%s' returned %d character(s)",
+                tool.name,
+                len(result_str) if isinstance(result_str, str) else -1,
+            )
             return result_str
 
         # Set function metadata
-        tool_impl.__signature__ = inspect.Signature(parameters=params)
+        # LiveKit's function_tool decorator reads __signature__ to build the tool
+        # schema; mypy does not model it on function objects.
+        tool_impl.__signature__ = inspect.Signature(parameters=params)  # type: ignore[attr-defined]
         tool_impl.__name__ = tool.name
         tool_impl.__doc__ = tool.description
         tool_impl.__annotations__ = {'return': str, **annotations}
@@ -128,9 +180,9 @@ class MCPToolsIntegration:
         return function_tool()(tool_impl)
 
     @staticmethod
-    async def register_with_agent(agent, mcp_servers: List[MCPServer],
+    async def register_with_agent(agent, mcp_servers: list[MCPServer],
                                  convert_schemas_to_strict: bool = True,
-                                 auto_connect: bool = True) -> List[Callable]:
+                                 auto_connect: bool = True) -> list[Callable]:
         """
         Helper method to prepare and register MCP tools with a LiveKit agent.
 
@@ -165,7 +217,7 @@ class MCPToolsIntegration:
         return tools
 
     @staticmethod
-    async def create_agent_with_tools(agent_class, mcp_servers: List[MCPServer], agent_kwargs: Dict = None,
+    async def create_agent_with_tools(agent_class, mcp_servers: list[MCPServer], agent_kwargs: dict | None = None,
                                     convert_schemas_to_strict: bool = True) -> Any:
         """
         Factory method to create and initialize an agent with MCP tools already loaded.
@@ -182,11 +234,9 @@ class MCPToolsIntegration:
         # Connect to MCP servers
         for server in mcp_servers:
             if not getattr(server, 'connected', False):
-                try:
+                with degraded(f"MCP server {server.name}", "connect"):
                     logger.debug(f"Connecting to MCP server: {server.name}")
                     await server.connect()
-                except Exception as e:
-                    logger.error(f"Failed to connect to MCP server {server.name}: {e}")
 
         # Create agent instance
         agent_kwargs = agent_kwargs or {}
