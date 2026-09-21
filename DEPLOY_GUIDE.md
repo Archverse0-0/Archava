@@ -18,10 +18,33 @@ Configure:
 - Framework: Vite
 - Build: `npm run build`
 - Output: `dist`
-- Node: 22.22.2 or a compatible newer runtime
+- Node: 24 (`.nvmrc`; CI pins the same version in `.github/workflows/ci.yml`)
 - `VITE_LIVEKIT_URL`: your LiveKit WSS URL
 
 The frontend expects `/api/getToken` on the same origin. If the Flask token service is hosted elsewhere, configure a same-origin reverse proxy/rewrite from `/api/*` to that service. Do not expose LiveKit API secrets in Vercel frontend variables.
+
+## CI deployments and secrets
+
+`.github/workflows/ci.yml` deploys the frontend on its own:
+
+- Pull requests → `Deploy Frontend Preview (Vercel)` publishes a preview once the gates pass.
+- Pushes to `main` → `Deploy Frontend Production (Vercel)` publishes production, and additionally waits on the dependency audit.
+
+Secrets live under Settings, then Secrets and variables, then Actions:
+
+| Secret | Used by | Required? |
+| --- | --- | --- |
+| `VERCEL_TOKEN` | both deploy jobs | yes, to deploy |
+| `VERCEL_ORG_ID` | both deploy jobs | yes, to deploy |
+| `VERCEL_PROJECT_ID` | both deploy jobs | yes, to deploy |
+| `CODECOV_TOKEN` | coverage upload | optional; upload is skipped without it |
+| `MONAD_RPC_URL` | contract deploy | manual dispatch only |
+| `DEPLOYER_PRIVATE_KEY` | contract deploy | manual dispatch only |
+| `MONAD_EXPLORER_API_KEY` | contract verification | manual dispatch only |
+
+The three Vercel secrets gate the deploy steps directly. While they are unset, the deploy step is skipped and the run is annotated with a warning that says no deployment was produced — rather than aborting on `Input required and not supplied: vercel-token`. A job that fails identically on every run regardless of the code is worse than no job: once reviewers learn that CI is always red, a real failure stops being read. The annotation keeps the absence loud instead of silent — it announces that nothing was deployed, it does not claim success. Setting the three secrets flips the condition and the deploy runs on the next push, with no further edit to the workflow.
+
+The contract-deploy secrets are deliberately different. That job runs only on manual `workflow_dispatch`, so a human asked for it; it fails loudly when they are missing instead of skipping, because a silent skip there would mean someone believing a deploy happened when it did not.
 
 ## Token service
 
@@ -67,6 +90,7 @@ Contract deployment is manual via GitHub `workflow_dispatch` or Foundry CLI. Aft
 - Forge build/tests pass
 - Slither passes or findings are reviewed
 - JS and Python dependency audits are reviewed
+- Vercel deploy secrets are configured, or the team knows no deploy was produced
 - `/api/getToken` rejects abusive volume and disallowed browser origins
 - Web3 confirmation verifies the real transaction event
 - staff wallet is the actual BookingEscrow owner

@@ -305,22 +305,48 @@ jobs:
               -vvvv
           fi
 
+  # The Vercel credentials are surfaced through `env` rather than read from
+  # `secrets` inside each step's `if`, because the `secrets` context is not
+  # available in a step condition — the same reason the Codecov step does it
+  # this way.
   deploy-frontend-preview:
     name: Deploy Frontend Preview (Vercel)
     runs-on: ubuntu-latest
     needs: [frontend-build, backend-lint, backend-test, contracts-test, contracts-slither]
     if: github.event_name == 'pull_request'
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: dist/
-      - uses: amondnet/vercel-action@v25
+      - name: Deploy to Vercel (preview)
+        if: env.VERCEL_TOKEN != '' && env.VERCEL_ORG_ID != '' && env.VERCEL_PROJECT_ID != ''
+        uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod=false'
+      # This repository currently has no secrets configured at all, so
+      # `vercel-token` is empty and the action aborts the job with
+      # "Input required and not supplied: vercel-token" on every run, whatever
+      # the code contains. That is a permanent red carrying no information
+      # about the change under review, and it is worse than useless: once
+      # reviewers learn that CI is always red, a real failure — the coverage
+      # threshold, the dependency audit, a Forge test — stops being read. The
+      # step is therefore skipped when the credentials are absent, and the run
+      # is told in plain words that no deployment was produced. That keeps the
+      # absence loud instead of silent: it annotates the run, it does not claim
+      # success. Adding the three secrets flips the condition above and the
+      # deploy runs on the next push, with no further edit to this file.
+      - name: Report unconfigured Vercel deployment
+        if: env.VERCEL_TOKEN == '' || env.VERCEL_ORG_ID == '' || env.VERCEL_PROJECT_ID == ''
+        run: |
+          echo "::warning title=No preview deployment produced::VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not set on this repository, so this run did not deploy a preview. This is a repository-configuration gap, not a code failure. Add the three secrets under Settings, then Secrets and variables, then Actions (see DEPLOY_GUIDE.md) and the deploy runs on the next push."
 
   deploy-frontend-production:
     name: Deploy Frontend Production (Vercel)
@@ -333,17 +359,31 @@ jobs:
       - contracts-slither
       - security-audit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: dist/
-      - uses: amondnet/vercel-action@v25
+      - name: Deploy to Vercel (production)
+        if: env.VERCEL_TOKEN != '' && env.VERCEL_ORG_ID != '' && env.VERCEL_PROJECT_ID != ''
+        uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod=true'
+      # Same reasoning as the preview job above: skip rather than hide, and say
+      # out loud that nothing was deployed. This one matters more — a silent
+      # failure here is the difference between "main is live" and "main is not
+      # live", so the annotation is the only thing standing in for a deploy.
+      - name: Report unconfigured Vercel deployment
+        if: env.VERCEL_TOKEN == '' || env.VERCEL_ORG_ID == '' || env.VERCEL_PROJECT_ID == ''
+        run: |
+          echo "::warning title=No production deployment produced::VERCEL_TOKEN, VERCEL_ORG_ID or VERCEL_PROJECT_ID is not set on this repository, so this run did not deploy the production frontend. This is a repository-configuration gap, not a code failure. Add the three secrets under Settings, then Secrets and variables, then Actions (see DEPLOY_GUIDE.md) and the deploy runs on the next push."
 
   notify:
     name: Summarize Failure
