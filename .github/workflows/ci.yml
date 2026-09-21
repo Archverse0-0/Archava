@@ -5,196 +5,84 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      deploy_contracts:
+        description: 'Deploy contracts to Monad Testnet'
+        required: false
+        default: false
+        type: boolean
 
 env:
-  NODE_VERSION: '20'
-  FOUNDRY_VERSION: 'nightly'
+  # Node 24 is required, not preferred. The jsdom / testing-library versions in
+  # this project declare engines of ^22.22.2 || ^24.15.0 || >=26.0.0, so Node 20
+  # and 22 both fail in the test job with
+  # `TypeError: webidl.util.markAsUncloneable is not a function`.
+  # `.nvmrc` pins the same version for local runs. Vercel must be configured
+  # with Node 24 as well; see DEPLOY_GUIDE.md.
+  NODE_VERSION: '24'
+  PYTHON_VERSION: '3.11'
+  FOUNDRY_VERSION: 'v1.8.3'
 
 jobs:
-  # =========================================================================
-  # FRONTEND JOBS
-  # =========================================================================
   frontend-lint:
     name: Frontend - Lint & TypeCheck
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./ # root
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Run ESLint
-        run: npm run lint
-
-      - name: Run TypeScript type check
-        run: npx tsc --noEmit
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npm run lint
+      - run: npx tsc --noEmit
 
   frontend-test:
     name: Frontend - Unit Tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./ # root
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Run unit tests
-        run: npm run test
-
-      - name: Run tests with coverage
-        run: npm run test:coverage
-
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v4
-        if: always()
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npm run test
+      - run: npm run test:coverage
+      # Coverage upload is optional. Codecov's tokenless upload is rejected for
+      # this repository ("Token required"), so without a configured secret the
+      # step used to fail on every run and was hidden behind
+      # `fail_ci_if_error: false` — a permanently red job step masquerading as
+      # green. The step is skipped entirely when no token exists, so the job is
+      # honest either way.
+      - uses: codecov/codecov-action@v5
+        if: always() && secrets.CODECOV_TOKEN != ''
         with:
           files: ./coverage/lcov.info
-          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   frontend-build:
     name: Frontend - Build
     runs-on: ubuntu-latest
     needs: [frontend-lint, frontend-test]
-    defaults:
-      run:
-        working-directory: ./ # root
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
+          cache: npm
+      - run: npm ci --legacy-peer-deps
       - name: Build frontend
+        env:
+          VITE_LIVEKIT_URL: ${{ secrets.VITE_LIVEKIT_URL }}
         run: npm run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: dist/
           retention-days: 7
 
-  # =========================================================================
-  # SMART CONTRACT JOBS
-  # =========================================================================
-  contracts-test:
-    name: Smart Contracts - Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./contracts
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: ${{ env.FOUNDRY_VERSION }}
-
-      - name: Install dependencies
-        run: forge install
-
-      - name: Build contracts
-        run: forge build
-
-      - name: Run tests
-        run: forge test -vvv
-
-      - name: Run coverage
-        run: forge coverage --report lcov
-
-      - name: Upload contract coverage
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: ./contracts/lcov.info
-          fail_ci_if_error: false
-
-  contracts-slither:
-    name: Smart Contracts - Slither Static Analysis
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./contracts
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Slither
-        uses: crytic/slither-action@v0.2.0
-
-      - name: Run Slither
-        run: slither . --exclude-informational --exclude-low --exclude optimization --exclude reentrancy-no-eth --exclude unused-state --exclude naming-convention --exclude external-function
-        continue-on-error: true
-
-  contracts-deploy-testnet:
-    name: Smart Contracts - Deploy to Monad Testnet
-    runs-on: ubuntu-latest
-    needs: [contracts-test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    defaults:
-      run:
-        working-directory: ./contracts
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: ${{ env.FOUNDRY_VERSION }}
-
-      - name: Deploy to Monad Testnet
-        env:
-          MONAD_RPC_URL: ${{ secrets.MONAD_RPC_URL }}
-          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
-          ETHERSCAN_API_KEY: ${{ secrets.MONAD_EXPLORER_API_KEY }}
-        run: |
-          forge script script/Deploy.s.sol \
-            --rpc-url $MONAD_RPC_URL \
-            --private-key $PRIVATE_KEY \
-            --broadcast \
-            --verify \
-            --etherscan-api-key $ETHERSCAN_API_KEY \
-            -vvvv
-
-  # =========================================================================
-  # BACKEND JOBS
-  # =========================================================================
   backend-lint:
     name: Backend - Lint & TypeCheck
     runs-on: ubuntu-latest
@@ -202,25 +90,33 @@ jobs:
       run:
         working-directory: ./backend
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff mypy
-
-      - name: Run Ruff linter
+          # Pinned to the versions this repository is linted with locally, so a
+          # new upstream release cannot turn a green branch red without a code
+          # change. ruff and mypy are dev tools and are intentionally not in
+          # requirements.txt.
+          pip install ruff==0.16.8 mypy==2.3.1
+      # This job runs with `working-directory: ./backend`, so both commands below
+      # execute inside `backend/` — that is what the bare `.` paths resolve to.
+      # The `pyproject.toml` ruff config at the repository root is still picked
+      # up, because ruff walks up the directory tree to find it. It deliberately
+      # adds import sorting (I) on top of ruff's defaults (E4, E7, E9, F).
+      # Mypy's `files = ["backend"]` is relative to the config file's directory,
+      # so it names the same `backend/` package whether mypy is invoked from the
+      # repository root or from inside it; that setting is what keeps the
+      # Foundry vendored deps under `contracts/lib/**` — whose helper scripts
+      # shadow each other's module names — from aborting the run with
+      # "Duplicate module named 'vm'".
+      - name: Ruff
         run: ruff check .
-
-      - name: Run MyPy type check
+      - name: Mypy
         run: mypy . --ignore-missing-imports
 
   backend-test:
@@ -230,123 +126,194 @@ jobs:
       run:
         working-directory: ./backend
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-mock
+      # pytest and pytest-asyncio are pinned in requirements.txt (pytest 8.x
+      # carries PYSEC-2026-1845), so they are deliberately NOT installed again
+      # here: an unpinned `pip install pytest` would silently upgrade past the
+      # pin and reintroduce the advisory.
+      - run: pytest -v
 
-      - name: Run tests
-        run: pytest -v
+  contracts-test:
+    name: Smart Contracts - Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - name: Install pinned Solidity dependencies
+        run: |
+          forge install foundry-rs/forge-std@v1.16.1 --no-git
+          forge install OpenZeppelin/openzeppelin-contracts@v5.7.0 --no-git
+      - run: forge build
+      - run: forge test -vvv
+      - run: forge coverage --report lcov
+      # Same reasoning as the frontend upload: skip rather than hide.
+      - uses: codecov/codecov-action@v5
+        if: always() && secrets.CODECOV_TOKEN != ''
+        with:
+          files: ./contracts/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-  # =========================================================================
-  # SECURITY JOBS
-  # =========================================================================
+  contracts-slither:
+    name: Smart Contracts - Slither
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install slither-analyzer
+          forge install foundry-rs/forge-std@v1.16.1 --no-git
+          forge install OpenZeppelin/openzeppelin-contracts@v5.7.0 --no-git
+      - name: Run Slither on project contracts
+        run: slither . --filter-paths 'lib/' --exclude-informational --exclude-low --exclude optimization --exclude reentrancy-no-eth --exclude naming-convention
+
   security-audit:
     name: Security - Dependency Audit
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Run npm audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-
-      - name: Run OWASP Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
+          cache: npm
+      - uses: actions/setup-python@v5
         with:
-          project: 'Archava'
-          path: '.'
-          format: 'HTML'
-          out: 'reports'
-          args: '--failOnCVSS 7'
-        continue-on-error: true
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: npm ci --legacy-peer-deps
+      # The narrow, documented gate rather than a raw `npm audit --audit-level=high`.
+      # The previous invocation was wrapped in `continue-on-error: true` while
+      # 2 critical and 17 high advisories were outstanding, which reported a
+      # green job for a failing audit. `npm run audit:deps` fails the job on any
+      # high/critical advisory that has no dated, justified entry in
+      # security/dependency-allowlist.json, and on any entry whose expiry has
+      # passed — so removing an entry or letting one lapse makes this job
+      # STRICTER, never looser. There is no continue-on-error here.
+      - name: Audit JavaScript dependency tree
+        run: npm run audit:deps
+      - name: Audit Python dependency tree
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt
 
-  # =========================================================================
-  # DEPLOYMENT JOBS
-  # =========================================================================
+  contracts-deploy-testnet:
+    name: Smart Contracts - Manual Monad Testnet Deploy
+    runs-on: ubuntu-latest
+    needs: [contracts-test, contracts-slither]
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_contracts == true
+    defaults:
+      run:
+        working-directory: ./contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - run: |
+          forge install foundry-rs/forge-std@v1.16.1 --no-git
+          forge install OpenZeppelin/openzeppelin-contracts@v5.7.0 --no-git
+      - name: Deploy to Monad Testnet
+        env:
+          MONAD_RPC_URL: ${{ secrets.MONAD_RPC_URL }}
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.MONAD_EXPLORER_API_KEY }}
+        run: |
+          # Verification is best-effort: it needs an explorer API key secret that
+          # not every environment configures. Without one the deploy itself must
+          # still succeed, so --verify is only passed when the key is present.
+          if [ -n "$ETHERSCAN_API_KEY" ]; then
+            forge script script/Deploy.s.sol \
+              --rpc-url "$MONAD_RPC_URL" \
+              --private-key "$PRIVATE_KEY" \
+              --broadcast \
+              --verify \
+              --etherscan-api-key "$ETHERSCAN_API_KEY" \
+              -vvvv
+          else
+            echo "::notice::MONAD_EXPLORER_API_KEY is not set; broadcasting without verification."
+            forge script script/Deploy.s.sol \
+              --rpc-url "$MONAD_RPC_URL" \
+              --private-key "$PRIVATE_KEY" \
+              --broadcast \
+              -vvvv
+          fi
+
   deploy-frontend-preview:
     name: Deploy Frontend Preview (Vercel)
     runs-on: ubuntu-latest
-    needs: [frontend-build]
+    needs: [frontend-build, backend-lint, backend-test, contracts-test, contracts-slither]
     if: github.event_name == 'pull_request'
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: dist/
-
-      - name: Deploy to Vercel Preview
-        uses: amondnet/vercel-action@v25
+      - uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod=false'
-        env:
-          VITE_LIVEKIT_URL: ${{ secrets.VITE_LIVEKIT_URL }}
 
   deploy-frontend-production:
     name: Deploy Frontend Production (Vercel)
     runs-on: ubuntu-latest
-    needs: [frontend-build, contracts-deploy-testnet]
+    needs:
+      - frontend-build
+      - backend-lint
+      - backend-test
+      - contracts-test
+      - contracts-slither
+      - security-audit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: dist/
-
-      - name: Deploy to Vercel Production
-        uses: amondnet/vercel-action@v25
+      - uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod=true'
-        env:
-          VITE_LIVEKIT_URL: ${{ secrets.VITE_LIVEKIT_URL }}
 
-  # =========================================================================
-  # NOTIFICATIONS
-  # =========================================================================
   notify:
-    name: Notify on Failure
+    name: Summarize Failure
     runs-on: ubuntu-latest
     needs:
       - frontend-lint
       - frontend-test
       - frontend-build
-      - contracts-test
-      - contracts-slither
       - backend-lint
       - backend-test
+      - contracts-test
+      - contracts-slither
       - security-audit
     if: failure()
     steps:
-      - name: Send failure notification
-        run: |
-          echo "CI/CD Pipeline failed!" 
-          echo "Check GitHub Actions for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        # Add Slack/Discord/Email notification here
+      - run: |
+          echo "CI/CD pipeline failed."
+          echo "Inspect: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
