@@ -120,6 +120,54 @@ async def sign_web3_transaction(context: RunContext) -> str:
         return "Gagal memicu wallet sign."
 
 
+def _smtp_settings() -> tuple[str, int, str, str, str, bool] | None:
+    """Resolve the generic SMTP transport configuration.
+
+    Reads ``SMTP_HOST`` / ``SMTP_PORT`` / ``SMTP_USER`` / ``SMTP_PASS`` /
+    ``SMTP_FROM`` / ``SMTP_USE_SSL``. The transport is deliberately not
+    provider-specific: any SMTP service that accepts a username/password login
+    works, and the host is never hard-coded. Returns ``None`` when the service
+    is not configured, which callers treat as "skip physical email" rather than
+    as an error.
+    """
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        return None
+    raw_port = os.environ.get("SMTP_PORT", "").strip()
+    try:
+        port = int(raw_port) if raw_port else 465
+    except ValueError:
+        logger.warning("[tools] SMTP_PORT is not an integer (%r); falling back to 465", raw_port)
+        port = 465
+    if not 1 <= port <= 65535:
+        logger.warning("[tools] SMTP_PORT %d is out of range; falling back to 465", port)
+        port = 465
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASS", "")
+    sender = os.environ.get("SMTP_FROM", "").strip() or user
+    if not sender:
+        logger.info("[tools] SMTP_HOST is set but SMTP_FROM/SMTP_USER is empty; skipping physical email")
+        return None
+    use_ssl = os.environ.get("SMTP_USE_SSL", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return host, port, user, password, sender, use_ssl
+
+
+def _open_smtp(host: str, port: int, user: str, password: str, use_ssl: bool) -> smtplib.SMTP:
+    """Open an authenticated SMTP session (implicit TLS, or STARTTLS when asked)."""
+    # Annotated as the base class because SMTP_SSL and SMTP are siblings: the
+    # `if` branch alone would otherwise narrow the inferred type to SMTP_SSL
+    # and mypy rejects the STARTTLS branch as an incompatible assignment.
+    smtp: smtplib.SMTP
+    if use_ssl:
+        smtp = smtplib.SMTP_SSL(host, port, timeout=10)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=10)
+        smtp.starttls()
+    if user and password:
+        smtp.login(user, password)
+    return smtp
+
+
 async def send_actual_email(
     to_email: str,
     name: str,
@@ -128,10 +176,18 @@ async def send_actual_email(
     check_out: str,
     guests: int,
 ) -> bool:
-    sender_email = os.environ.get("GMAIL_SENDER_EMAIL")
-    app_password = os.environ.get("GMAIL_APP_PASSWORD")
-    if not sender_email or not app_password:
-        logger.info("[tools] Gmail SMTP credentials are not configured; skipping physical email")
+    settings = _smtp_settings()
+    if settings is None:
+        logger.info("[tools] SMTP is not configured; skipping physical email")
+        return False
+    host, port, user, password, sender, use_ssl = settings
+
+    # `to_email` reaches the SMTP envelope and the To header verbatim. The
+    # caller's validation already rejects whitespace, but this function is also
+    # reachable from the booking tool directly, so the check is repeated here
+    # rather than assumed: a CR/LF in a recipient is header injection.
+    if not _EMAIL_RE.match(to_email):
+        logger.warning("[tools] Refusing to email a malformed address")
         return False
 
     safe_name = html.escape(name)
@@ -142,8 +198,8 @@ async def send_actual_email(
 
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"White Rock VIP Daybed Request - {room_type}"
-        msg["From"] = f"White Rock Beach Club Bali <{sender_email}>"
+        msg["Subject"] = f"White Rock VIP Daybed Request - {safe_room}"
+        msg["From"] = f"White Rock Beach Club Bali <{sender}>"
         msg["To"] = to_email
 
         body = f"""
@@ -165,9 +221,8 @@ async def send_actual_email(
         """
         msg.attach(MIMEText(body, "html"))
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as smtp:
-            smtp.login(sender_email, app_password)
-            smtp.sendmail(sender_email, to_email, msg.as_string())
+        with _open_smtp(host, port, user, password, use_ssl) as smtp:
+            smtp.sendmail(sender, to_email, msg.as_string())
         logger.info("[tools] Physical reservation email dispatched")
         return True
     except Exception:

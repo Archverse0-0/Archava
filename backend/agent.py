@@ -1,14 +1,27 @@
-from dotenv import load_dotenv
-from prompts import AGENT_INSTRUCTION
-from livekit import agents
-from livekit.agents import APIConnectOptions, AgentSession, Agent, room_io
-from livekit.plugins import google
-from mcp_client import MCPServerSse
-from mcp_client.agent_tools import MCPToolsIntegration
 import json
 import os
-from tools import open_browser, send_booking_email, close_session, check_room_availability, trigger_web3_booking, sign_web3_transaction
-from livekit.plugins import tavus
+import sys
+
+from dotenv import load_dotenv
+from livekit import agents
+from livekit.agents import NOT_GIVEN, Agent, AgentSession, APIConnectOptions, room_io
+from livekit.plugins import google, tavus
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from degradation import degraded
+from mcp_client import MCPServerSse
+from mcp_client.agent_tools import MCPToolsIntegration
+from prompts import AGENT_INSTRUCTION
+from tools import (
+    check_room_availability,
+    close_session,
+    open_browser,
+    send_booking_email,
+    sign_web3_transaction,
+    trigger_web3_booking,
+)
+
 load_dotenv()
 
 
@@ -27,11 +40,26 @@ def env_flag(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def required_env(name: str) -> str:
+    """Read a mandatory setting, failing fast with an actionable message.
+
+    LiveKit distinguishes "argument not supplied" from "argument supplied as
+    None"; passing a missing API key through as ``None`` would only surface at
+    the first provider call, far from the misconfiguration.
+    """
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"{name} is required but is not configured. See backend/.env.example."
+        )
+    return value
+
+
 def create_session() -> AgentSession:
     return AgentSession(
         llm=google.realtime.RealtimeModel(
             model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-live-preview"),
-            api_key=os.environ.get("GEMINI_API_KEY"),
+            api_key=required_env("GEMINI_API_KEY"),
             voice=os.environ.get("GEMINI_VOICE", "Kore"),
             # Gemini 3.1 does not accept mid-session instruction updates.
             instructions=AGENT_INSTRUCTION,
@@ -61,7 +89,7 @@ async def entrypoint(ctx: agents.JobContext):
 
     mcp_url = optional_env("N8N_MCP_SERVER_URL")
     if mcp_url:
-        try:
+        with degraded("n8n MCP server", "init"):
             mcp_server = MCPServerSse(
                 params={"url": mcp_url},
                 cache_tools_list=True,
@@ -71,8 +99,7 @@ async def entrypoint(ctx: agents.JobContext):
                 agent_class=Assistant,
                 mcp_servers=[mcp_server]
             )
-        except Exception as e:
-            print(f"[agent] Warning: MCP server init failed ({e}), falling back to standard Assistant", flush=True)
+        if not isinstance(agent, Assistant):
             agent = Assistant()
     else:
         agent = Assistant()
@@ -86,7 +113,9 @@ async def entrypoint(ctx: agents.JobContext):
     if tavus_enabled and tavus_key and face_id:
         avatar = tavus.AvatarSession(
             face_id=face_id,
-            pal_id=pal_id,
+            # ``pal_id`` selects a reusable persona and is genuinely optional;
+            # LiveKit needs the "not supplied" sentinel rather than ``None``.
+            pal_id=pal_id if pal_id is not None else NOT_GIVEN,
             api_key=tavus_key,
             # Do not retry non-recoverable provider errors (for example HTTP 402)
             # three times before enabling voice-only mode.
@@ -97,22 +126,19 @@ async def entrypoint(ctx: agents.JobContext):
 
     avatar_status = "voice_only"
     if avatar is not None:
-        try:
+        with degraded("Tavus avatar", "start"):
             # Current LiveKit avatar lifecycle: start and join the avatar before
             # starting AgentSession so its audio output is routed correctly.
             await avatar.start(session, room=ctx.room)
             await avatar.wait_for_join(timeout=20.0)
             avatar_status = "ready"
             print("[agent] Tavus avatar connected", flush=True)
-        except Exception as exc:
-            print(
-                f"[agent] Tavus unavailable ({type(exc).__name__}); continuing voice-only",
-                flush=True,
-            )
-            await avatar.aclose()
-            avatar = None
+        if avatar_status == "voice_only":
             # AvatarSession may replace the audio output after its API call.
             # A fresh session guarantees that fallback audio goes to the room.
+            with degraded("Tavus avatar", "close"):
+                await avatar.aclose()
+            avatar = None
             session = create_session()
     else:
         reason = "disabled" if not tavus_enabled else "not configured"
@@ -127,10 +153,8 @@ async def entrypoint(ctx: agents.JobContext):
         ),
     )
 
-    try:
+    with degraded("avatar status", "publish"):
         await publish_avatar_status(ctx, avatar_status)
-    except Exception as exc:
-        print(f"[agent] Could not publish avatar status: {exc}", flush=True)
 
     # Gemini 3.1 native audio cannot use AgentSession.say() without a separate
     # TTS/audio source. The first user utterance triggers the greeting rules in

@@ -5,7 +5,6 @@ import {
   useLocalParticipant,
   DisconnectButton,
   useRoomContext,
-  useDataChannel,
 } from "@livekit/components-react";
 import { Track, RoomEvent } from "livekit-client";
 import { useCallback, useEffect, useState } from "react";
@@ -22,6 +21,7 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
   const localParticipant = useLocalParticipant();
   const [pendingBooking, setPendingBooking] = useState(null);
   const [avatarStatus, setAvatarStatus] = useState("connecting");
+  const [bookingNotice, setBookingNotice] = useState(null);
 
   const handleDataReceived = useCallback((payload, participant, kind, topic) => {
     try {
@@ -40,18 +40,46 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
         return;
       }
       if (data && data.action === "trigger_web3_booking") {
+        // The agent tool always sends a canonical daybed name and the date the
+        // guest asked for. If either is missing there is nothing trustworthy to
+        // book, so refuse rather than substitute "Lagoon Bed" / today's date —
+        // a fabricated booking would prompt the wallet for money the guest
+        // never agreed to spend.
+        const daybedName = typeof data.daybedName === "string" ? data.daybedName.trim() : "";
+        const visitDate = typeof data.visitDate === "string" ? data.visitDate.trim() : "";
+        if (!daybedName || !visitDate) {
+          console.warn("[ai-avatar] Refusing incomplete booking packet:", data);
+          setBookingNotice(
+            "Ava belum menyebutkan tipe daybed dan tanggal yang jelas. Mohon ulangi permintaan reservasi."
+          );
+          return;
+        }
         console.log("[ai-avatar] Web3 booking modal triggered by Ava:", data);
+        setBookingNotice(null);
         setPendingBooking({
           daybedType: data.daybedType ?? 0,
-          daybedName: data.daybedName || "Lagoon Bed",
-          visitDate: data.visitDate || new Date().toISOString().split("T")[0],
+          daybedName,
+          visitDate,
           autoSign: !!data.autoSign,
         });
         return;
       }
       if (data && data.action === "auto_sign") {
-        console.log("[ai-avatar] Voice auto-sign command received!");
-        setPendingBooking((prev) => (prev ? { ...prev, autoSign: true } : { daybedType: 0, daybedName: "Lagoon Bed", visitDate: new Date().toISOString().split("T")[0], autoSign: true }));
+        // A voice "sign" request can only ever *release* a booking the guest
+        // already created in the UI. Inventing a daybed and today's date here
+        // would make the wallet prompt for a booking the guest never asked
+        // for, so refuse instead and let the UI say so.
+        console.log("[ai-avatar] Voice auto-sign command received");
+        setPendingBooking((prev) => {
+          if (!prev) {
+            setBookingNotice(
+              "Ava belum memilih reservasi untuk ditandatangani. Pilih daybed dan tanggal terlebih dahulu."
+            );
+            return prev;
+          }
+          setBookingNotice(null);
+          return { ...prev, autoSign: true };
+        });
         return;
       }
       if (data && (data.action === "navigate" || data.url)) {
@@ -118,7 +146,11 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
     }
   }, [room, navigate]);
 
-  // Listen to LiveKit navigation data packets from backend agent tool (open_browser)
+  // Single canonical listener for every agent data packet. LiveKit's
+  // ``RoomEvent.DataReceived`` fires once per published packet regardless of
+  // topic, and the agent publishes to the ``navigation`` topic, so adding
+  // ``useDataChannel("navigation", ...)`` on top of this would run every
+  // action twice (double navigation, double wallet prompt, double disconnect).
   useEffect(() => {
     if (!room) return;
     room.on(RoomEvent.DataReceived, handleDataReceived);
@@ -126,12 +158,6 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
       room.off(RoomEvent.DataReceived, handleDataReceived);
     };
   }, [room, handleDataReceived]);
-
-  useDataChannel("navigation", (data) => {
-    if (data && data.payload) {
-      handleDataReceived(data.payload, null, null, "navigation");
-    }
-  });
 
   const { segments: userTranscriptions } = useTrackTranscription({
     publication: localParticipant.microphoneTrack,
@@ -253,6 +279,16 @@ const AvatarVoiceAgent = ({ onDisconnect }) => {
             }}
           />
         </div>
+      )}
+
+      {/* Booking state notice — also tells the guest why a voice "sign" did nothing */}
+      {bookingNotice && (
+        <p
+          role="status"
+          className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-[11px] text-amber-200"
+        >
+          {bookingNotice}
+        </p>
       )}
 
       {/* Status indicator */}

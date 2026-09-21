@@ -5,6 +5,24 @@ import AvatarVoiceAgent from "./AvatarVoiceAgent";
 import { useLang } from "@/lib/i18n";
 import "./LiveKitWidget.css";
 
+/**
+ * Origin of the token server that issues LiveKit access tokens.
+ *
+ * This is a build-time Vite variable because the browser cannot read runtime
+ * environment variables from a static bundle: once `npm run build` has run,
+ * every `import.meta.env.VITE_*` reference has been substituted with a literal
+ * string. Leaving it empty makes the request same-origin (`/api/getToken`),
+ * which is correct behind the nginx reverse proxy in docker-compose and in the
+ * Vite dev server (which proxies `/api` to `localhost:5001`).
+ *
+ * It must be set when the frontend and the token server are on different
+ * origins — most importantly on Vercel, where no reverse proxy exists and a
+ * relative `/api/getToken` would 404. See DEPLOY_GUIDE.md.
+ */
+const TOKEN_API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+
+const tokenEndpoint = () => `${TOKEN_API_BASE}/api/getToken`;
+
 const LiveKitWidget = ({ setShowSupport }) => {
   const { tf } = useLang();
   const [token, setToken] = useState(null);
@@ -17,7 +35,7 @@ const LiveKitWidget = ({ setShowSupport }) => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const response = await fetch("/api/getToken", {
+      const response = await fetch(tokenEndpoint(), {
         signal: controller.signal,
         credentials: "same-origin",
         headers: { Accept: "text/plain" },
