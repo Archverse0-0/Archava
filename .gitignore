@@ -23,12 +23,33 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment — never commit secrets
 .env
+.env.*
+!.env.example
+backend/.env
 
 # Python
 .venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Test coverage
 coverage/
+contracts/coverage/
+lcov.info
+contracts/lcov.info
+reports/
+
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+
+# Tooling leftovers (local only, must never be committed)
+archava-hardening-v1.zip
+pyproject.toml.bak
+scripts/apply_hardening_bundle.py
