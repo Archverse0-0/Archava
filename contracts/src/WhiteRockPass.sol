@@ -168,7 +168,13 @@ contract WhiteRockPass is ERC721Enumerable, Ownable {
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
-        return string(abi.encodePacked(_baseURI(), tokenId.toString(), ".json"));
+        // The id is rendered as a fixed-width 32-byte hex string rather than a
+        // decimal one. `_baseURI()` is owner-mutable (`setBaseURI`), so with a
+        // variable-length decimal suffix the concatenation is ambiguous:
+        // baseURI "https://x/1" + token 23 and baseURI "https://x/12" + token 3
+        // both yield "https://x/123.json". A fixed-width suffix cannot be split
+        // two ways, so every token keeps a distinct URI across base URI changes.
+        return string.concat(_baseURI(), tokenId.toHexString(32), ".json");
     }
 
     function withdraw() external onlyOwner {

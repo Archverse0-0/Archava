@@ -359,7 +359,28 @@ contract WhiteRockPassTest is Test {
         vm.stopPrank();
 
         string memory uri = pass.tokenURI(1);
-        assertEq(uri, "https://api.whiterockbali.com/metadata/1.json");
+        assertEq(uri, "https://api.whiterockbali.com/metadata/0x0000000000000000000000000000000000000000000000000000000000000001.json");
+    }
+
+    function test_tokenURI_staysDistinctAcrossBaseURIChanges() public {
+        // Regression test for the encodePacked collision: a variable-length
+        // decimal suffix made token 23 under ".../1" and token 3 under ".../12"
+        // produce the same URI. The fixed-width suffix keeps them apart.
+        vm.startPrank(alice);
+        for (uint256 i = 0; i < 24; i++) {
+            usdt.approve(address(pass), 10 * 10**6);
+            pass.mintPass(WhiteRockPass.PassTier.LAGOON);
+        }
+        vm.stopPrank();
+
+        string memory before = pass.tokenURI(23);
+
+        vm.prank(owner);
+        pass.setBaseURI("https://api.whiterockbali.com/metadata/1");
+
+        assertEq(pass.tokenURI(3), "https://api.whiterockbali.com/metadata/10x0000000000000000000000000000000000000000000000000000000000000003.json");
+        assertEq(before, "https://api.whiterockbali.com/metadata/0x0000000000000000000000000000000000000000000000000000000000000017.json");
+        assertTrue(keccak256(bytes(pass.tokenURI(3))) != keccak256(bytes(pass.tokenURI(23))));
     }
 
     function test_tokenURI_revert_nonExistent() public {

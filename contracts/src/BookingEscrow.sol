@@ -203,6 +203,35 @@ contract BookingEscrow is ReentrancyGuard, Ownable, EIP712 {
             if (msg.value < requiredDeposit) revert InvalidDeposit();
         } else {
             if (msg.value != 0) revert InvalidDeposit();
+            // This is the standard relayer / meta-transaction pattern, not an
+            // arbitrary transfer. `guest` is both the `from` of the pull and the
+            // signer whose authorization is being verified above:
+            //
+            //   * The digest is rebuilt in-contract from the EIP-712 domain
+            //     (chainId + verifyingContract) and the intent tuple
+            //     (guest, daybedType, visitTimestamp, depositAmount,
+            //     paymentToken, nonce, deadline). Changing any one of those
+            //     fields changes the digest, so a relayer cannot redirect the
+            //     `from`, the token, the daybed, the date, the amount, or the
+            //     expiry. `ECDSA.recover` must equal `guest`, so the signature
+            //     authorizes exactly this pull and nothing else.
+            //   * `requiredDeposit` comes from `calculateDeposit`, not from the
+            //     caller; `depositAmount != requiredDeposit` reverts. The relayer
+            //     cannot inflate the pulled amount.
+            //   * `nonces[guest]` is incremented, so an intent is single-use and
+            //     cannot be replayed.
+            //   * `block.timestamp > deadline` reverts, and the visit must be in
+            //     the future, bounding the window in which a signature is live.
+            //   * `nonReentrant` guards the whole function.
+            //
+            // Covered by test/SecurityAudit.t.sol (tampered guest / daybed /
+            // deposit / nonce / deadline, wrong chain, wrong verifying contract,
+            // cross-signer replay, invalid signature) and
+            // test/SecurityRegression.t.sol. The alternative — making the guest
+            // pay their own gas — is exactly the UX this function exists to
+            // remove, and there is no way to verify a signature without the
+            // signer's address being an input to it.
+            // slither-disable-next-line arbitrary-send-erc20
             usdtToken.safeTransferFrom(guest, address(this), requiredDeposit);
         }
 

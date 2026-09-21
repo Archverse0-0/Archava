@@ -16,6 +16,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
+      // Scope the measured denominator to this project's own source. Without
+      // this, `coverage.all` (on by default) globs the whole working tree and
+      // drags every vendored and generated file into the report — the entire
+      // OpenZeppelin `scripts/` and `docs/` trees under `contracts/lib/`, plus
+      // whatever `node_modules` shipping happens to match. That is thousands of
+      // lines no frontend test could ever execute, and it drove the reported
+      // repo-wide number down to under 1%, so the thresholds below were
+      // measuring library tooling rather than this codebase.
+      include: ["src/**/*.{ts,tsx,js,jsx}"],
       exclude: [
         "node_modules/",
         "src/test/",

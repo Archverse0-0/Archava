@@ -184,7 +184,17 @@ export const Web3BookingButton: React.FC<Web3BookingButtonProps> = ({
     } finally {
       setStep("idle");
     }
-  }, [address, dateString, daybedType, depositUsdt, onSuccess, publicClient, usdtAllowance, writeContractAsync]);
+  }, [
+    address,
+    dateString,
+    daybedType,
+    depositUsdt,
+    onSuccess,
+    publicClient,
+    refetchAllowance,
+    usdtAllowance,
+    writeContractAsync,
+  ]);
 
   useEffect(() => {
     if (!autoSign) {

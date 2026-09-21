@@ -310,6 +310,76 @@ contract SecurityAuditTest is Test {
     //              INTEGER OVERFLOW / UNDERFLOW TESTS
     // ============================================================
 
+    // ============================================================
+    //        SIGNATURE REPLAY (nonce single-use enforcement)
+    // ============================================================
+
+    /**
+     * @dev These two tests pin down the invariant behind the
+     * `arbitrary-send-erc20` suppression in BookingEscrow. A valid intent must
+     * be usable exactly once. The digest already binds every field, so the only
+     * remaining question is whether re-submitting the SAME signature can pull a
+     * second deposit from the same guest.
+     */
+
+    function test_signature_cannotBeReplayedForASecondBooking() public {
+        address guestAddr = vm.addr(0xA11CE); // the key _createBookingIntent signs with
+        uint64 visitTs = uint64(block.timestamp + 2 days);
+        uint256 deadline = uint256(block.timestamp + 1 hours);
+        uint256 deposit = 0.01 ether;
+        // guestAddr is not one of setUp's funded actors; the pull is funded by the
+        // caller, so it needs ETH of its own.
+        vm.deal(guestAddr, 1 ether);
+
+        bytes memory sig = _createBookingIntent(
+            guestAddr, 0, visitTs, deposit, address(0), escrow.nonces(guestAddr), deadline, block.chainid, address(escrow)
+        );
+
+        vm.startPrank(guestAddr);
+        escrow.createBookingWithSignature{value: deposit}(guestAddr, 0, visitTs, deposit, address(0), deadline, sig);
+
+        // Same signature, same everything. The nonce has advanced, so the digest
+        // no longer matches and the pull must not happen a second time.
+        vm.expectRevert(BookingEscrow.InvalidSignature.selector);
+        escrow.createBookingWithSignature{value: deposit}(guestAddr, 0, visitTs, deposit, address(0), deadline, sig);
+        vm.stopPrank();
+
+        // One booking, and exactly one deposit's worth of value moved.
+        // Indexed accessor form: the mapping getter exposes the element at the
+        // given index, and reverts when it is out of range.
+        assertEq(escrow.userBookingIds(guestAddr, 0), 1);
+        vm.expectRevert();
+        escrow.userBookingIds(guestAddr, 1);
+        assertEq(address(escrow).balance, deposit);
+    }
+
+    function test_signature_nonceAdvancedByUse() public {
+        address guestAddr = vm.addr(0xA11CE);
+        uint64 visitTs = uint64(block.timestamp + 2 days);
+        uint256 deadline = uint256(block.timestamp + 1 hours);
+        uint256 deposit = 0.01 ether;
+        vm.deal(guestAddr, 2 ether); // two bookings, each funded by the caller
+
+        uint256 nonceBefore = escrow.nonces(guestAddr);
+        bytes memory sig = _createBookingIntent(
+            guestAddr, 0, visitTs, deposit, address(0), nonceBefore, deadline, block.chainid, address(escrow)
+        );
+
+        vm.prank(guestAddr);
+        escrow.createBookingWithSignature{value: deposit}(guestAddr, 0, visitTs, deposit, address(0), deadline, sig);
+
+        assertEq(escrow.nonces(guestAddr), nonceBefore + 1);
+
+        // A fresh intent signed at the new nonce still works, so the increment
+        // is what invalidates the old one — not a permanent lockout.
+        bytes memory sig2 = _createBookingIntent(
+            guestAddr, 0, visitTs, deposit, address(0), nonceBefore + 1, deadline, block.chainid, address(escrow)
+        );
+        vm.prank(guestAddr);
+        escrow.createBookingWithSignature{value: deposit}(guestAddr, 0, visitTs, deposit, address(0), deadline, sig2);
+        assertEq(escrow.userBookingIds(guestAddr, 1), 2);
+    }
+
     function test_discountBpsOverflow() public {
         vm.expectRevert("Discount cannot exceed 100%");
         pass.setTierConfig(WhiteRockPass.PassTier.LAGOON, 0.05 ether, 10100, 500, true);
